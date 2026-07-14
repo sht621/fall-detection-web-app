@@ -7,7 +7,9 @@ ARG GROUP_ID=1000
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
     QT_X11_NO_MITSHM=1 \
+    YOLO_CONFIG_DIR=/tmp \
     HOME=/home/appuser
 
 # Keep the existing CUDA/X11-oriented image choice so USB-camera development can
@@ -15,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     ffmpeg \
+    libgtk-3-0 \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
@@ -28,14 +31,13 @@ RUN python -m pip install --no-cache-dir \
     opencv-python==4.13.0.92 \
     httpx==0.28.1
 
-RUN groupadd --gid ${GROUP_ID} appuser \
-    && useradd --uid ${USER_ID} --gid ${GROUP_ID} --create-home --shell /bin/bash appuser \
+RUN if ! getent group ${GROUP_ID} >/dev/null; then groupadd --gid ${GROUP_ID} appuser; fi \
+    && if ! id -u appuser >/dev/null 2>&1; then useradd --non-unique --uid ${USER_ID} --gid ${GROUP_ID} --create-home --shell /bin/bash appuser; fi \
     && mkdir -p /app/output /app/models \
-    && chown -R appuser:appuser /app /home/appuser
+    && chown -R ${USER_ID}:${GROUP_ID} /app /home/appuser
 
 WORKDIR /app
-COPY --chown=appuser:appuser src/camera/app /app/app
+COPY --chown=${USER_ID}:${GROUP_ID} src/camera/app /app/app
 
 USER appuser
 CMD ["python", "-m", "app.main"]
-

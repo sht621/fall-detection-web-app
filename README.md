@@ -27,11 +27,66 @@ camera container -- REST --> FastAPI + SQLite -- SSE --> browser
 
 3. ブラウザで [http://localhost:8000/monitor](http://localhost:8000/monitor) を開きます。
 
-`SIMULATE_FALL=true` の場合、camera コンテナは起動から約 5 秒後に一度だけダミー転倒を送信します。前後約 5 秒の生成フレームを MP4 としてアップロードするため、画面には先に `CAPTURING`、その後 `READY` が表示されます。
+`SIMULATE_FALL=true` の場合、camera コンテナは起動から約 5 秒後に一度だけダミー転倒を送信します。前後約 5 秒の元フレームを MP4 としてアップロードするため、画面には先に `CAPTURING`、その後 `READY` が表示されます。
 
-物理 USB カメラを使う段階では、ホストのデバイスと X11 を Compose に追加し、`CAMERA_DEVICE` と `ENABLE_LOCAL_DISPLAY=true` を設定してください。ローカル表示を有効にすると `f` キーでもイベントを発火できます。Compose のデフォルトは、カメラが無い開発 PC でも動くダミーフレームです。
+camera 側は `CAMERA_DEVICE=/dev/video0` を OpenCV の V4L2 バックエンドで開き、`MODEL_PATH=/app/models/yolo26n-pose.pt` の YOLO pose モデルで人物の BBox とスケルトンをローカル画面へ描画します。ローカル表示中は `f` キーでもダミーイベントを発火できます。`q` または `ESC` で正常終了します。
 
 起動を止めるには `docker compose down` を使用します。SQLite と動画はホスト側の `data/` に残ります。
+
+## USB カメラと YOLO pose
+
+モデルファイルをホスト側へ配置します。
+
+```bash
+mkdir -p models
+# models/yolo26n-pose.pt を配置
+```
+
+ホスト側で USB カメラを確認します。
+
+```bash
+v4l2-ctl --list-devices
+ls -l /dev/video*
+```
+
+X11 表示を使う場合は、現在のローカルユーザだけを許可します。
+
+```bash
+xhost +SI:localuser:$(id -un)
+```
+
+確認後に許可を戻す場合は次を実行します。
+
+```bash
+xhost -SI:localuser:$(id -un)
+```
+
+camera を起動します。
+
+```bash
+docker compose up --build camera
+```
+
+バックグラウンドで起動する場合は次を使います。
+
+```bash
+docker compose up -d --build camera
+docker compose logs -f camera
+```
+
+ヘッドレス環境では `.env` で `SHOW_WINDOW=false` を指定します。この場合も USB カメラ取得と YOLO pose 推論ループは実行されますが、`cv2.imshow()` は呼びません。
+
+確認する項目:
+
+- USB カメラが開けた
+- 実画像が表示された
+- YOLO26n-pose が `models/yolo26n-pose.pt` から読み込まれた
+- PyTorch から CUDA と GPU 名がログに出た
+- 人物 BBox とスケルトンが描画された
+- 処理 FPS、YOLO 推論時間、検出人数、device、camera ID が画面表示された
+- 人物がいない状態でも停止しない
+- `q`、`ESC`、`Ctrl+C` で終了できた
+- `SHOW_WINDOW=false` でもループが動作した
 
 ## 画面と API
 
@@ -48,7 +103,7 @@ camera container -- REST --> FastAPI + SQLite -- SSE --> browser
 
 ## ファイル構成
 
-- `src/camera/app/main.py`: カメラ取得、ダミー発火、動画生成・送信の入口
+- `src/camera/app/main.py`: USB カメラ取得、YOLO pose 推論、BBox/スケルトン描画、ダミー発火の入口
 - `src/camera/app/fall_detector.py`: timestamp ベースの転倒判定状態機械の骨組み
 - `src/camera/app/video_buffer.py`: 元フレームだけを保持するリングバッファと MP4 出力
 - `src/camera/app/api_client.py`: Bearer 認証付き HTTPX クライアントと簡易再試行
@@ -61,9 +116,9 @@ camera container -- REST --> FastAPI + SQLite -- SSE --> browser
 
 ## 現時点の未実装項目
 
-- YOLO26n-pose からの keypoint/BBox 抽出と実際のルールベース転倒判定
+- YOLO26n-pose の精度調整と実際のルールベース転倒判定
 - 複数人物追跡、複数カメラ管理、heartbeat
 - セッション Cookie、CSRF、防御を含む本番認証
 - 永続再送キュー、SSE 再送保証、複数 Uvicorn ワーカー対応
-- H.264/yuv420p 出力、動画内容検証、HTTP Range の明示的な最適化
+- 転倒前後動画生成の本格調整、H.264/yuv420p 出力、動画内容検証、HTTP Range の明示的な最適化
 - HTTPS、顔ぼかし、音声保存、自動動画削除、Web Push
