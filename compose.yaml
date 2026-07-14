@@ -1,0 +1,62 @@
+name: fall-detection-web-app
+
+services:
+  server:
+    image: fall-detection-web-server:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+      args:
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      DATABASE_PATH: ${DATABASE_PATH:-/data/fall_detection.sqlite3}
+      VIDEO_DIR: ${VIDEO_DIR:-/data/videos}
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./src/server/app:/app/app
+      - ./data:/data
+    init: true
+    networks:
+      - fall-monitor-network
+
+  camera:
+    image: fall-detection-web-camera:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.camera
+      args:
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      CAMERA_DEVICE: ${CAMERA_DEVICE:-0}
+      SERVER_BASE_URL: ${SERVER_BASE_URL:-http://server:8000}
+      PROCESS_FPS: ${PROCESS_FPS:-10}
+      SIMULATE_FALL: ${SIMULATE_FALL:-true}
+      DISPLAY: ${DISPLAY:-:0}
+    depends_on:
+      - server
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./src/camera/app:/app/app
+      - ./data/camera-output:/app/output
+      - ./models:/app/models:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    devices:
+      - "${HOST_CAMERA_DEVICE:-/dev/video0}:${CONTAINER_CAMERA_DEVICE:-/dev/video0}"
+    gpus: all
+    init: true
+    stdin_open: true
+    tty: true
+    networks:
+      - fall-monitor-network
+
+networks:
+  fall-monitor-network:
+    driver: bridge

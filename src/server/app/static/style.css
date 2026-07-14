@@ -1,0 +1,70 @@
+:root {
+  color: #1b2635;
+  background: #f3f6f8;
+  font-family: Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px max(20px, calc((100% - 1200px) / 2));
+  background: #174b5b;
+  color: #fff;
+}
+
+h1, h2 { margin: 0; letter-spacing: 0; }
+h1 { font-size: 22px; }
+h2 { font-size: 18px; }
+
+main { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+.connection, .notification, .badge {
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.connection { padding: 7px 10px; }
+.connection.connected { background: #d8f2e4; color: #125c36; }
+.connection.disconnected { background: #fce2dc; color: #8b2a1e; }
+
+.notification { min-height: 0; margin: 0 0 16px; padding: 0; color: #8b2a1e; }
+.notification.visible { padding: 11px 14px; background: #fff0d5; border-left: 4px solid #d86a00; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); gap: 22px; }
+.event-panel, .detail-panel { min-width: 0; }
+.event-panel h2, .detail-panel h2 { margin-bottom: 12px; }
+
+.table-wrap { overflow-x: auto; border: 1px solid #c8d2d9; background: #fff; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 12px; border-bottom: 1px solid #e0e6ea; text-align: left; white-space: nowrap; }
+th { background: #e8eff2; font-size: 13px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover, tbody tr:focus, tbody tr.selected { background: #dff0f3; outline: none; }
+
+.badge { display: inline-block; padding: 5px 7px; }
+.capturing, .uploading { background: #fff0d5; color: #885000; }
+.ready { background: #d8f2e4; color: #125c36; }
+.failed { background: #fce2dc; color: #8b2a1e; }
+.unreviewed { background: #e5ebef; color: #435568; }
+.fall_confirmed { background: #f8dce1; color: #8c1630; }
+.no_fall { background: #dcebf8; color: #1d5688; }
+
+.selected-summary { min-height: 40px; margin: 0 0 10px; color: #435568; }
+video { display: block; width: 100%; min-height: 220px; background: #101820; }
+.review-actions { display: flex; gap: 10px; margin-top: 12px; }
+button { border: 0; border-radius: 4px; padding: 10px 14px; color: #fff; background: #1d6576; cursor: pointer; font-weight: 700; }
+button#reject-fall { background: #566b7c; }
+button:disabled { background: #a8b5bf; cursor: not-allowed; }
+
+@media (max-width: 760px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .layout { grid-template-columns: 1fr; }
+  main { padding: 16px; }
+}

@@ -1,0 +1,41 @@
+FROM pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    QT_X11_NO_MITSHM=1 \
+    HOME=/home/appuser
+
+# Keep the existing CUDA/X11-oriented image choice so USB-camera development can
+# use the same container later; the dummy mode does not require a physical camera.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    v4l-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir \
+    ultralytics==8.4.95 \
+    opencv-python==4.13.0.92 \
+    httpx==0.28.1
+
+RUN groupadd --gid ${GROUP_ID} appuser \
+    && useradd --uid ${USER_ID} --gid ${GROUP_ID} --create-home --shell /bin/bash appuser \
+    && mkdir -p /app/output /app/models \
+    && chown -R appuser:appuser /app /home/appuser
+
+WORKDIR /app
+COPY --chown=appuser:appuser src/camera/app /app/app
+
+USER appuser
+CMD ["python", "-m", "app.main"]
+
