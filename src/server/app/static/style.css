@@ -6,6 +6,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 body { margin: 0; }
 
 .topbar {
@@ -83,6 +85,7 @@ video { display: block; width: 100%; min-height: 220px; background: #101820; }
 .review-actions { display: flex; gap: 10px; margin-top: 12px; }
 button { border: 0; border-radius: 4px; padding: 10px 14px; color: #fff; background: #1d6576; cursor: pointer; font-weight: 700; }
 button#reject-fall { background: #566b7c; }
+button.danger-button { background: #9b2438; }
 button.secondary-button { padding: 7px 10px; color: #174b5b; background: #e8eff2; }
 button:disabled { background: #a8b5bf; cursor: not-allowed; }
 

@@ -197,3 +197,19 @@ def review_detection(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detection not found")
     return row
+
+
+@app.delete("/api/detections/{event_id}", dependencies=[Depends(require_csrf)])
+def delete_detection(event_id: str) -> dict[str, object]:
+    row = DATABASE.delete_detection(event_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detection not found")
+
+    if row.get("video_path"):
+        video_path = Path(str(row["video_path"]))
+        try:
+            video_path.unlink(missing_ok=True)
+        except OSError:
+            LOGGER.exception("could not delete video file for %s: %s", event_id, video_path)
+
+    return {"deleted": True, "event_id": event_id}

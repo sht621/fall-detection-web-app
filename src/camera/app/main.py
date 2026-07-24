@@ -259,19 +259,10 @@ def select_primary_person(detections: list[PoseDetection]) -> PoseDetection | No
     return max(detections, key=lambda detection: detection.area)
 
 
-def draw_pose(display_frame: np.ndarray, detection: PoseDetection, primary: bool) -> None:
+def draw_pose(display_frame: np.ndarray, detection: PoseDetection, fall_detected: bool) -> None:
     x1, y1, x2, y2 = (int(round(v)) for v in detection.bbox)
-    color = (0, 220, 255) if primary else (80, 200, 80)
+    color = (0, 0, 255) if fall_detected else (0, 200, 0)
     cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
-    cv2.putText(
-        display_frame,
-        f"{detection.bbox_confidence:.2f}",
-        (x1, max(20, y1 - 8)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        color,
-        2,
-    )
 
     points = detection.keypoints_xy
     scores = detection.keypoints_confidence
@@ -288,21 +279,10 @@ def draw_pose(display_frame: np.ndarray, detection: PoseDetection, primary: bool
         cv2.circle(display_frame, tuple(point.astype(int)), 3, (255, 255, 255), -1)
 
 
-def draw_status(
-    display_frame: np.ndarray,
-    camera_id: str,
-    processing_fps: float,
-    inference_ms: float,
-    detection_count: int,
-    pose_device: str,
-) -> None:
-    lines = [
-        f"camera: {camera_id}",
-        f"process fps: {processing_fps:.1f}",
-        f"yolo: {inference_ms:.1f} ms",
-        f"persons: {detection_count}",
-        f"device: {pose_device}",
-    ]
+def draw_status(display_frame: np.ndarray, camera_id: str, fall_active: bool) -> None:
+    lines = [f"camera: {camera_id}"]
+    if fall_active:
+        lines.append("fall detected")
     y = 24
     for line in lines:
         cv2.putText(display_frame, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 0, 0), 4)
@@ -315,14 +295,12 @@ def draw_local_preview(
     detections: list[PoseDetection],
     primary: PoseDetection | None,
     camera_id: str,
-    processing_fps: float,
-    inference_ms: float,
-    pose_device: str,
+    fall_active: bool,
 ) -> np.ndarray:
     display_frame = raw_frame.copy()
     for detection in detections:
-        draw_pose(display_frame, detection, detection is primary)
-    draw_status(display_frame, camera_id, processing_fps, inference_ms, len(detections), pose_device)
+        draw_pose(display_frame, detection, fall_active and detection is primary)
+    draw_status(display_frame, camera_id, fall_active)
     return display_frame
 
 
@@ -449,9 +427,7 @@ def main() -> None:
                     detections,
                     primary,
                     camera_id,
-                    processing_fps,
-                    inference_ms,
-                    pose_device,
+                    pending_event is not None or detected,
                 )
                 try:
                     should_stop = handle_window(display_frame)

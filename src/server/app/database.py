@@ -126,6 +126,15 @@ class Database:
             )
             return self._fetch_detection(connection, event_id)
 
+    def delete_detection(self, event_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = self._fetch_detection(connection, event_id)
+            if row is None:
+                return None
+            connection.execute("DELETE FROM review_logs WHERE event_id = ?", (event_id,))
+            connection.execute("DELETE FROM detections WHERE event_id = ?", (event_id,))
+            return row
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
@@ -136,4 +145,3 @@ class Database:
     def _fetch_detection(connection: sqlite3.Connection, event_id: str) -> dict[str, Any] | None:
         row = connection.execute("SELECT * FROM detections WHERE event_id = ?", (event_id,)).fetchone()
         return dict(row) if row is not None else None
-

@@ -28,6 +28,13 @@ camera container -- REST --> FastAPI + SQLite -- SSE --> browser
 
 3. ブラウザで [http://localhost:8000/monitor](http://localhost:8000/monitor) を開きます。
 
+   初期ログイン:
+
+   ```text
+   ユーザー名: admin
+   パスワード: admin
+   ```
+
 camera 側は `CAMERA_DEVICE=/dev/video0` を OpenCV の V4L2 バックエンドで開き、`MODEL_PATH=yolo26n-pose.pt` の YOLO pose モデルで人物の BBox とスケルトンをローカル画面へ描画します。モデルは Ultralytics が初回起動時に自動ダウンロードします。`q` または `ESC` で正常終了します。
 
 簡易ルールが転倒候補を検出すると、イベント登録、前後動画保存、監視画面へのSSE通知を行います。実環境では閾値調整が必要です。
@@ -99,7 +106,7 @@ docker compose logs -f camera
 - 初回起動時に必要ならモデルが自動ダウンロードされた
 - PyTorch から CUDA と GPU 名がログに出た
 - 人物 BBox とスケルトンが描画された
-- 処理 FPS、YOLO 推論時間、検出人数、device、camera ID が画面表示された
+- 通常時は BBox とスケルトンが緑、転倒検知中の主要人物だけ赤で表示された
 - 人物がいない状態でも停止しない
 - `q`、`ESC`、`Ctrl+C` で終了できた
 - `SHOW_WINDOW=false` でもループが動作した
@@ -114,18 +121,19 @@ docker compose logs -f camera
 - `GET /api/detections/{event_id}`: イベント詳細
 - `GET /api/detections/{event_id}/video`: 保存済み動画
 - `PATCH /api/detections/{event_id}/review`: `FALL_CONFIRMED` または `NO_FALL` の登録
+- `DELETE /api/detections/{event_id}`: イベントと保存動画の削除
 
-カメラ API は `Authorization: Bearer <CAMERA_API_TOKEN>` を必要とします。監視者操作は `AUTH_DISABLED=true` の間、固定の開発ユーザとして保存されます。
+カメラ API は `Authorization: Bearer <CAMERA_API_TOKEN>` を必要とします。監視者操作はログイン後のセッションCookieとCSRFトークンで保護します。
 
 動画アップロードは開発用に `MAX_VIDEO_UPLOAD_BYTES=52428800` のサイズ上限を持ちます。動画の中身の厳密な検証は今後の調整対象です。
 
-ログイン画面と確認画面はどちらも `/monitor` で配信されます。未ログイン時はログインフォームだけを表示し、ログイン後にイベント一覧、動画再生、確認ボタンを表示します。小規模な監視画面なのでページ遷移を増やさず、API側のセッション認証でデータを保護します。
+ログイン画面と確認画面はどちらも `/monitor` で配信されます。未ログイン時はログインフォームだけを表示し、ログイン後にイベント一覧、動画再生、確認ボタン、削除ボタンを表示します。小規模な監視画面なのでページ遷移を増やさず、API側のセッション認証でデータを保護します。
 
 通知はWeb Pushではなく、監視画面を開いてSSE接続中のブラウザに表示される画面内通知です。転倒イベント登録時に `fall_detected`、動画保存完了時に `video_ready` を受け取り、一覧を即時更新します。ブラウザを閉じている場合や未ログインの場合は通知されません。
 
 ## 監視画面の認証
 
-開発中は `.env` の `AUTH_DISABLED=true` により、監視者APIは固定の開発ユーザで動作します。ログイン画面、セッションCookie、CSRFを確認する場合は次のようにします。
+既定ではログイン画面が表示されます。初期値は授業課題用のダミー認証なので、共有・提出前に必要ならパスワードハッシュと `SESSION_SECRET` を変更します。
 
 ```bash
 python3 - <<'PY'
@@ -145,14 +153,15 @@ PY
 `.env` を次のように変更します。
 
 ```text
-AUTH_DISABLED=false
 SESSION_SECRET=32文字以上のランダム文字列
-MONITOR_USERNAME=monitor
+MONITOR_USERNAME=admin
 MONITOR_PASSWORD_HASH=上で生成した値
 SESSION_COOKIE_SECURE=false
 ```
 
 ローカルHTTPで確認する間は `SESSION_COOKIE_SECURE=false` のままにします。HTTPSで公開する場合は `SESSION_COOKIE_SECURE=true` に変更します。
+
+ログインを省略して動作確認したい場合だけ、`.env` で `AUTH_DISABLED=true` にします。
 
 ## ファイル構成
 
@@ -176,7 +185,7 @@ SESSION_COOKIE_SECURE=false
 - X11 表示で `q` / `ESC` による終了操作を実機画面で確認
 - 初回起動時にネットワーク経由で `yolo26n-pose.pt` を自動ダウンロードできるか確認。オフライン提出環境では `models/yolo26n-pose.pt` を置き、`MODEL_PATH=/app/models/yolo26n-pose.pt` に変更
 - 保存された MP4 が提出先・確認用ブラウザで再生できるか確認
-- `AUTH_DISABLED=false` でログイン、確認結果PATCH、ログアウトが期待どおり動くか確認
+- ログイン、確認結果PATCH、ログアウトが期待どおり動くか確認
 - HTTPSで公開する場合は `SESSION_COOKIE_SECURE=true` とCookie動作を確認
 
 ## 残っている発展項目

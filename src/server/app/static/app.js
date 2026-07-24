@@ -21,6 +21,7 @@ const elements = {
   video: document.getElementById("video-player"),
   confirm: document.getElementById("confirm-fall"),
   reject: document.getElementById("reject-fall"),
+  deleteEvent: document.getElementById("delete-event"),
 };
 
 function formatDate(value) {
@@ -160,6 +161,7 @@ function renderSelected() {
   const hasSelection = Boolean(detection);
   elements.confirm.disabled = !hasSelection;
   elements.reject.disabled = !hasSelection;
+  elements.deleteEvent.disabled = !hasSelection;
   if (!detection) {
     elements.summary.textContent = "イベントを選択してください。";
     elements.video.removeAttribute("src");
@@ -197,6 +199,32 @@ async function submitReview(reviewResult) {
   upsertDetections([await response.json()]);
   render();
   showNotification("確認結果を保存しました。");
+}
+
+async function deleteSelectedDetection() {
+  if (!state.selectedId) return;
+  const detection = state.detections.get(state.selectedId);
+  if (!detection) return;
+  const ok = window.confirm(`${formatDate(detection.detected_at)} のイベントを削除します。`);
+  if (!ok) return;
+
+  const response = await fetch(`/api/detections/${encodeURIComponent(state.selectedId)}`, {
+    method: "DELETE",
+    headers: { "X-CSRF-Token": state.csrfToken || "" },
+  });
+  if (response.status === 401) {
+    setUnauthenticated();
+    return;
+  }
+  if (!response.ok) {
+    showNotification("イベントを削除できませんでした。");
+    return;
+  }
+
+  state.detections.delete(state.selectedId);
+  state.selectedId = null;
+  render();
+  showNotification("イベントを削除しました。");
 }
 
 function connectEvents() {
@@ -253,6 +281,7 @@ async function logout() {
 
 elements.confirm.addEventListener("click", () => submitReview("FALL_CONFIRMED"));
 elements.reject.addEventListener("click", () => submitReview("NO_FALL"));
+elements.deleteEvent.addEventListener("click", deleteSelectedDetection);
 elements.loginForm.addEventListener("submit", submitLogin);
 elements.logout.addEventListener("click", logout);
 
