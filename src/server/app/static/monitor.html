@@ -12,7 +12,7 @@
       <div class="topbar-status">
         <p id="current-user" class="current-user"></p>
         <button id="logout" class="secondary-button" type="button" hidden>ログアウト</button>
-        <p id="sse-status" class="connection disconnected">SSE 接続中...</p>
+        <p id="sse-status" class="connection disconnected">SSE 未接続</p>
       </div>
     </header>
     <main>
@@ -31,7 +31,7 @@
           <button type="submit">ログイン</button>
         </form>
       </section>
-      <section class="layout" aria-label="転倒イベント確認">
+      <section class="layout" aria-label="転倒イベント確認" hidden>
         <section class="event-panel">
           <h2>イベント一覧</h2>
           <div class="table-wrap">

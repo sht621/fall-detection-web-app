@@ -331,14 +331,12 @@ def ensure_display_available(show_window: bool) -> None:
         LOGGER.warning("SHOW_WINDOW=true but DISPLAY is not set; OpenCV imshow may fail. Set SHOW_WINDOW=false for headless.")
 
 
-def handle_window(display_frame: np.ndarray) -> tuple[bool, bool]:
+def handle_window(display_frame: np.ndarray) -> bool:
     cv2.imshow(WINDOW_NAME, display_frame)
     key = cv2.waitKey(1) & 0xFF
     if key in (ord("q"), 27):
-        return True, False
-    if key == ord("f"):
-        return False, True
-    return False, False
+        return True
+    return False
 
 
 def main() -> None:
@@ -353,9 +351,6 @@ def main() -> None:
     pose_image_size = env_int("POSE_IMAGE_SIZE", 640)
     show_window = env_flag("SHOW_WINDOW", True)
     max_read_failures = env_int("MAX_CAMERA_READ_FAILURES", 10)
-    simulate_fall = env_flag("SIMULATE_FALL")
-    simulate_after = env_float("SIMULATE_FALL_AFTER_SECONDS", 5.0)
-    fall_rules_enabled = env_flag("FALL_RULES_ENABLED")
     fall_candidate_seconds = env_float("FALL_CANDIDATE_SECONDS", 1.0)
     fall_bbox_aspect_threshold = env_float("FALL_BBOX_ASPECT_THRESHOLD", 1.15)
     fall_torso_angle_threshold = env_float("FALL_TORSO_ANGLE_THRESHOLD", 60.0)
@@ -388,22 +383,19 @@ def main() -> None:
             torso_angle_threshold=fall_torso_angle_threshold,
         )
         buffer = VideoBuffer(fps=process_fps)
-        started_at = time.monotonic()
         next_process_at = time.perf_counter()
         frame_interval = 1.0 / process_fps
         read_failures = 0
-        simulated = False
         pending_event: tuple[str, float] | None = None
         processing_fps = 0.0
         last_processed_at: float | None = None
         last_status_log_at = time.monotonic()
 
         LOGGER.info(
-            "camera processing started camera_id=%s process_fps=%.2f show_window=%s fall_rules_enabled=%s",
+            "camera processing started camera_id=%s process_fps=%.2f show_window=%s",
             camera_id,
             process_fps,
             show_window,
-            fall_rules_enabled,
         )
         while not stop_requested:
             now = time.perf_counter()
@@ -439,7 +431,7 @@ def main() -> None:
             )
             bbox = primary.bbox if primary is not None else None
 
-            detected = detector.update(keypoints=keypoints, bbox=bbox, timestamp=timestamp) if fall_rules_enabled else False
+            detected = detector.update(keypoints=keypoints, bbox=bbox, timestamp=timestamp)
 
             if timestamp - last_status_log_at >= status_log_seconds:
                 LOGGER.info(
@@ -451,7 +443,6 @@ def main() -> None:
                 )
                 last_status_log_at = timestamp
 
-            keyboard_fall = False
             if show_window:
                 display_frame = draw_local_preview(
                     raw_frame,
@@ -463,22 +454,20 @@ def main() -> None:
                     pose_device,
                 )
                 try:
-                    should_stop, keyboard_fall = handle_window(display_frame)
+                    should_stop = handle_window(display_frame)
                 except cv2.error as exc:
                     raise RuntimeError("OpenCV window display failed. Check X11 settings or set SHOW_WINDOW=false.") from exc
                 if should_stop:
                     LOGGER.info("normal shutdown requested from keyboard")
                     break
 
-            simulated_fall = simulate_fall and not simulated and timestamp - started_at >= simulate_after
-            if pending_event is None and (simulated_fall or keyboard_fall or detected):
+            if pending_event is None and detected:
                 event_id = str(uuid.uuid4())
                 try:
                     api_client.register_detection(event_id, camera_id, utc_now())
                     LOGGER.info("registered detection %s", event_id)
                     detector.mark_detected(timestamp)
                     pending_event = (event_id, timestamp)
-                    simulated = simulated or simulated_fall
                 except Exception:
                     LOGGER.exception("could not register detection %s", event_id)
 

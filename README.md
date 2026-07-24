@@ -1,6 +1,6 @@
 # fall-detection-web-app
 
-ダミー転倒イベントを使って、カメラから FastAPI/SQLite、SSE、監視画面、確認結果保存までの通信を確認する最小構成です。ROS、WebSocket、Redis は使用しません。
+USBカメラ映像をYOLO poseで処理し、転倒イベント、FastAPI/SQLite、SSE、監視画面、確認結果保存までを確認する最小構成です。ROS、WebSocket、Redis は使用しません。
 
 ```text
 camera container -- REST --> FastAPI + SQLite -- SSE --> browser
@@ -10,17 +10,17 @@ camera container -- REST --> FastAPI + SQLite -- SSE --> browser
 
 ## 起動方法
 
-1. 開発用の環境変数ファイルと永続化ディレクトリを作成します。
+1. 永続化ディレクトリを作成します。
 
    ```bash
-   cp .env.example .env
-   mkdir -p data/camera-output
+   mkdir -p data/camera-output models
    ```
 
-   ホストの UID/GID が 1000 以外なら、`.env` の `HOST_UID` と `HOST_GID` を `id -u` / `id -g` の値に合わせます。これにより SQLite と動画をホスト側へ root 所有で作らないようにします。
-   USB カメラのグループ ID が 44 以外なら、`.env` の `VIDEO_GID` を `getent group video | cut -d: -f3` の値に合わせます。
+   `.env` は必須ではありません。設定を変える場合だけ `cp .env.example .env` して編集します。
 
-2. コンテナを起動します。
+   ホストの UID/GID が 1000 以外なら、`.env` の `HOST_UID` と `HOST_GID` を `id -u` / `id -g` の値に合わせます。USB カメラのグループ ID が 44 以外なら、`VIDEO_GID` を `getent group video | cut -d: -f3` の値に合わせます。
+
+2. server と camera をまとめて起動します。
 
    ```bash
    docker compose up --build
@@ -28,11 +28,18 @@ camera container -- REST --> FastAPI + SQLite -- SSE --> browser
 
 3. ブラウザで [http://localhost:8000/monitor](http://localhost:8000/monitor) を開きます。
 
-`SIMULATE_FALL=true` の場合、camera コンテナは起動から約 5 秒後に一度だけダミー転倒を送信します。前後約 5 秒の元フレームを MP4 としてアップロードするため、画面には先に `CAPTURING`、その後 `READY` が表示されます。
+camera 側は `CAMERA_DEVICE=/dev/video0` を OpenCV の V4L2 バックエンドで開き、`MODEL_PATH=yolo26n-pose.pt` の YOLO pose モデルで人物の BBox とスケルトンをローカル画面へ描画します。モデルは Ultralytics が初回起動時に自動ダウンロードします。`q` または `ESC` で正常終了します。
 
-camera 側は `CAMERA_DEVICE=/dev/video0` を OpenCV の V4L2 バックエンドで開き、`MODEL_PATH=yolo26n-pose.pt` の YOLO pose モデルで人物の BBox とスケルトンをローカル画面へ描画します。モデルは Ultralytics が初回起動時に自動ダウンロードします。ローカル表示中は `f` キーでもダミーイベントを発火できます。`q` または `ESC` で正常終了します。
+簡易ルールが転倒候補を検出すると、イベント登録、前後動画保存、監視画面へのSSE通知を行います。実環境では閾値調整が必要です。
 
 複数人物が映った場合、画面上は検出された人物を描画しますが、転倒判定の入力には BBox 面積が最大の1人だけを使います。人物追跡や ID 管理はこの課題では扱いません。
+
+バックグラウンドで起動する場合は次を使います。
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
 
 起動を止めるには `docker compose down` を使用します。SQLite と動画はホスト側の `data/` に残ります。
 
@@ -67,7 +74,7 @@ xhost +SI:localuser:$(id -un)
 xhost -SI:localuser:$(id -un)
 ```
 
-camera を起動します。
+camera だけを起動したい場合は次を使います。
 
 ```bash
 docker compose up --build camera
@@ -82,7 +89,7 @@ docker compose logs -f camera
 
 ヘッドレス環境では `.env` で `SHOW_WINDOW=false` を指定します。この場合も USB カメラ取得と YOLO pose 推論ループは実行されますが、`cv2.imshow()` は呼びません。
 
-簡易ルールによる転倒イベント送信を試す場合は `.env` で `FALL_RULES_ENABLED=true` にします。既定では `false` のため、姿勢推定だけではイベントを送信せず、`SIMULATE_FALL=true` または `f` キーで通信確認を行います。
+転倒判定は簡易ルールです。実際の教室やカメラ位置に合わせて `.env` の `FALL_CANDIDATE_SECONDS`、`FALL_BBOX_ASPECT_THRESHOLD`、`FALL_TORSO_ANGLE_THRESHOLD` を調整します。
 
 確認する項目:
 
@@ -111,6 +118,10 @@ docker compose logs -f camera
 カメラ API は `Authorization: Bearer <CAMERA_API_TOKEN>` を必要とします。監視者操作は `AUTH_DISABLED=true` の間、固定の開発ユーザとして保存されます。
 
 動画アップロードは開発用に `MAX_VIDEO_UPLOAD_BYTES=52428800` のサイズ上限を持ちます。動画の中身の厳密な検証は今後の調整対象です。
+
+ログイン画面と確認画面はどちらも `/monitor` で配信されます。未ログイン時はログインフォームだけを表示し、ログイン後にイベント一覧、動画再生、確認ボタンを表示します。小規模な監視画面なのでページ遷移を増やさず、API側のセッション認証でデータを保護します。
+
+通知はWeb Pushではなく、監視画面を開いてSSE接続中のブラウザに表示される画面内通知です。転倒イベント登録時に `fall_detected`、動画保存完了時に `video_ready` を受け取り、一覧を即時更新します。ブラウザを閉じている場合や未ログインの場合は通知されません。
 
 ## 監視画面の認証
 
@@ -145,7 +156,7 @@ SESSION_COOKIE_SECURE=false
 
 ## ファイル構成
 
-- `src/camera/app/main.py`: USB カメラ取得、YOLO pose 推論、BBox/スケルトン描画、ダミー発火の入口
+- `src/camera/app/main.py`: USB カメラ取得、YOLO pose 推論、BBox/スケルトン描画、転倒イベント送信の入口
 - `src/camera/app/fall_detector.py`: timestamp ベースの簡易転倒判定状態機械
 - `src/camera/app/video_buffer.py`: 元フレームだけを保持するリングバッファと FFmpeg pipe による H.264/yuv420p MP4 出力
 - `src/camera/app/api_client.py`: Bearer 認証付き HTTPX クライアントと簡易再試行
@@ -160,8 +171,8 @@ SESSION_COOKIE_SECURE=false
 
 - 実カメラ画面で BBox とスケルトンが人物に合っているか確認
 - 実際の教室、照明、カメラ角度で `POSE_CONFIDENCE` と `POSE_IMAGE_SIZE` を調整
-- 転倒判定を使う場合は `FALL_RULES_ENABLED=true` にし、`FALL_CANDIDATE_SECONDS`、`FALL_BBOX_ASPECT_THRESHOLD`、`FALL_TORSO_ANGLE_THRESHOLD` を実映像で調整
-- ダミー発火ではなく実判定で通知する運用に切り替えるタイミングを確認
+- `FALL_CANDIDATE_SECONDS`、`FALL_BBOX_ASPECT_THRESHOLD`、`FALL_TORSO_ANGLE_THRESHOLD` を実映像で調整
+- 簡易ルールで誤検知や見逃しがどの程度あるか確認
 - X11 表示で `q` / `ESC` による終了操作を実機画面で確認
 - 初回起動時にネットワーク経由で `yolo26n-pose.pt` を自動ダウンロードできるか確認。オフライン提出環境では `models/yolo26n-pose.pt` を置き、`MODEL_PATH=/app/models/yolo26n-pose.pt` に変更
 - 保存された MP4 が提出先・確認用ブラウザで再生できるか確認
