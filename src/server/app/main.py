@@ -8,12 +8,12 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user
+from app.auth import AuthUser, authenticate, clear_session_cookie, create_session_cookie, get_current_user, require_csrf
 from app.database import Database
 from app.sse import SSEBroker
 
@@ -26,6 +26,7 @@ DATABASE = Database(os.getenv("DATABASE_PATH", "/data/fall_detection.sqlite3"))
 VIDEO_DIR = Path(os.getenv("VIDEO_DIR", "/data/videos"))
 SSE = SSEBroker()
 VALID_REVIEWS = {"FALL_CONFIRMED", "NO_FALL"}
+MAX_VIDEO_UPLOAD_BYTES = int(os.getenv("MAX_VIDEO_UPLOAD_BYTES", str(50 * 1024 * 1024)))
 
 
 class DetectionInput(BaseModel):
@@ -35,6 +36,11 @@ class DetectionInput(BaseModel):
 
 class ReviewInput(BaseModel):
     review_result: str
+
+
+class LoginInput(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
 
 
 @asynccontextmanager
@@ -78,12 +84,30 @@ def monitor() -> FileResponse:
 
 
 @app.get("/api/events")
-async def events(request: Request) -> StreamingResponse:
+async def events(request: Request, _: AuthUser = Depends(get_current_user)) -> StreamingResponse:
     return StreamingResponse(
         SSE.stream(request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/login")
+def login(credentials: LoginInput, response: Response) -> dict[str, str]:
+    user = authenticate(credentials.username, credentials.password)
+    create_session_cookie(response, user)
+    return {"username": user.username, "csrf_token": user.csrf_token}
+
+
+@app.post("/api/logout", dependencies=[Depends(require_csrf)])
+def logout(response: Response) -> dict[str, str]:
+    clear_session_cookie(response)
+    return {"status": "ok"}
+
+
+@app.get("/api/me")
+def me(current_user: AuthUser = Depends(get_current_user)) -> dict[str, str]:
+    return {"username": current_user.username, "csrf_token": current_user.csrf_token}
 
 
 @app.put("/api/camera/detections/{event_id}", dependencies=[Depends(require_camera_token)])
@@ -105,14 +129,24 @@ async def upload_video(event_id: str, file: UploadFile = File(...)) -> dict[str,
     destination = VIDEO_DIR / safe_video_filename(event_id)
     temporary = destination.with_suffix(".part")
     try:
-        # TODO: validate video size/content and add stronger rollback handling for production.
+        total_size = 0
         with temporary.open("wb") as output:
             while chunk := await file.read(1024 * 1024):
+                total_size += len(chunk)
+                if total_size > MAX_VIDEO_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="video upload is too large",
+                    )
                 output.write(chunk)
         temporary.replace(destination)
         row = DATABASE.mark_video_ready(event_id, str(destination), destination.stat().st_size)
         if row is None:
             raise RuntimeError("detection disappeared before video update")
+    except HTTPException:
+        temporary.unlink(missing_ok=True)
+        DATABASE.mark_video_failed(event_id)
+        raise
     except Exception as exc:
         temporary.unlink(missing_ok=True)
         DATABASE.mark_video_failed(event_id)
@@ -126,12 +160,12 @@ async def upload_video(event_id: str, file: UploadFile = File(...)) -> dict[str,
 
 
 @app.get("/api/detections")
-def list_detections() -> list[dict[str, object]]:
+def list_detections(_: AuthUser = Depends(get_current_user)) -> list[dict[str, object]]:
     return DATABASE.list_detections()
 
 
 @app.get("/api/detections/{event_id}")
-def get_detection(event_id: str) -> dict[str, object]:
+def get_detection(event_id: str, _: AuthUser = Depends(get_current_user)) -> dict[str, object]:
     row = DATABASE.get_detection(event_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detection not found")
@@ -139,24 +173,27 @@ def get_detection(event_id: str) -> dict[str, object]:
 
 
 @app.get("/api/detections/{event_id}/video")
-def get_video(event_id: str) -> FileResponse:
+def get_video(event_id: str, _: AuthUser = Depends(get_current_user)) -> FileResponse:
     row = DATABASE.get_detection(event_id)
     if row is None or row["video_status"] != "READY" or not row["video_path"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video not ready")
     video_path = Path(str(row["video_path"]))
     if not video_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video file not found")
-    # TODO: add deliberate HTTP Range behavior if long clips are introduced.
+    # Starlette FileResponse handles byte ranges, which is enough for these short review clips.
     return FileResponse(video_path, media_type="video/mp4", filename=f"{event_id}.mp4")
 
 
 @app.patch("/api/detections/{event_id}/review")
 def review_detection(
-    event_id: str, review: ReviewInput, current_user: str = Depends(get_current_user)
+    event_id: str,
+    review: ReviewInput,
+    current_user: AuthUser = Depends(get_current_user),
+    _: None = Depends(require_csrf),
 ) -> dict[str, object]:
     if review.review_result not in VALID_REVIEWS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid review result")
-    row = DATABASE.review_detection(event_id, review.review_result, current_user)
+    row = DATABASE.review_detection(event_id, review.review_result, current_user.username)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detection not found")
     return row

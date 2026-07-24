@@ -2,9 +2,18 @@ const state = {
   detections: new Map(),
   selectedId: null,
   eventSource: null,
+  csrfToken: null,
+  username: null,
 };
 
 const elements = {
+  layout: document.querySelector(".layout"),
+  loginPanel: document.getElementById("login-panel"),
+  loginForm: document.getElementById("login-form"),
+  loginUsername: document.getElementById("login-username"),
+  loginPassword: document.getElementById("login-password"),
+  currentUser: document.getElementById("current-user"),
+  logout: document.getElementById("logout"),
   list: document.getElementById("detection-list"),
   notification: document.getElementById("notification"),
   sseStatus: document.getElementById("sse-status"),
@@ -50,12 +59,52 @@ function setConnectionStatus(connected) {
   elements.sseStatus.className = `connection ${connected ? "connected" : "disconnected"}`;
 }
 
+function setAuthenticated(user) {
+  state.username = user.username;
+  state.csrfToken = user.csrf_token;
+  elements.loginPanel.hidden = true;
+  elements.layout.hidden = false;
+  elements.logout.hidden = false;
+  elements.currentUser.textContent = user.username;
+}
+
+function setUnauthenticated() {
+  state.username = null;
+  state.csrfToken = null;
+  state.detections = new Map();
+  state.selectedId = null;
+  state.eventSource?.close();
+  state.eventSource = null;
+  setConnectionStatus(false);
+  elements.currentUser.textContent = "";
+  elements.logout.hidden = true;
+  elements.layout.hidden = true;
+  elements.loginPanel.hidden = false;
+  elements.loginPassword.value = "";
+  render();
+}
+
 function upsertDetections(detections) {
   detections.forEach((detection) => state.detections.set(detection.event_id, detection));
 }
 
+async function loadSession() {
+  const response = await fetch("/api/me", { cache: "no-store" });
+  if (response.status === 401) {
+    setUnauthenticated();
+    return false;
+  }
+  if (!response.ok) throw new Error("ログイン状態を確認できませんでした。");
+  setAuthenticated(await response.json());
+  return true;
+}
+
 async function loadDetections() {
   const response = await fetch("/api/detections", { cache: "no-store" });
+  if (response.status === 401) {
+    setUnauthenticated();
+    return;
+  }
   if (!response.ok) throw new Error("イベント一覧を取得できませんでした。");
   const detections = await response.json();
   state.detections = new Map();
@@ -134,9 +183,13 @@ async function submitReview(reviewResult) {
   if (!state.selectedId) return;
   const response = await fetch(`/api/detections/${encodeURIComponent(state.selectedId)}/review`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrfToken || "" },
     body: JSON.stringify({ review_result: reviewResult }),
   });
+  if (response.status === 401) {
+    setUnauthenticated();
+    return;
+  }
   if (!response.ok) {
     showNotification("確認結果を保存できませんでした。");
     return;
@@ -147,6 +200,7 @@ async function submitReview(reviewResult) {
 }
 
 function connectEvents() {
+  state.eventSource?.close();
   state.eventSource = new EventSource("/api/events");
   state.eventSource.addEventListener("open", async () => {
     setConnectionStatus(true);
@@ -169,11 +223,48 @@ function connectEvents() {
   });
 }
 
+async function submitLogin(event) {
+  event.preventDefault();
+  const response = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: elements.loginUsername.value,
+      password: elements.loginPassword.value,
+    }),
+  });
+  if (!response.ok) {
+    showNotification("ログインできませんでした。");
+    return;
+  }
+  setAuthenticated(await response.json());
+  elements.loginPassword.value = "";
+  await loadDetections();
+  connectEvents();
+}
+
+async function logout() {
+  await fetch("/api/logout", {
+    method: "POST",
+    headers: { "X-CSRF-Token": state.csrfToken || "" },
+  });
+  setUnauthenticated();
+}
+
 elements.confirm.addEventListener("click", () => submitReview("FALL_CONFIRMED"));
 elements.reject.addEventListener("click", () => submitReview("NO_FALL"));
+elements.loginForm.addEventListener("submit", submitLogin);
+elements.logout.addEventListener("click", logout);
 
 window.addEventListener("beforeunload", () => state.eventSource?.close());
 
-loadDetections().catch((error) => showNotification(error.message));
-connectEvents();
-
+loadSession()
+  .then(async (authenticated) => {
+    if (!authenticated) return;
+    await loadDetections();
+    connectEvents();
+  })
+  .catch((error) => {
+    setUnauthenticated();
+    showNotification(error.message);
+  });

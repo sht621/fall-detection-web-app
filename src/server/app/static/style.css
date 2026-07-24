@@ -18,6 +18,16 @@ body { margin: 0; }
   color: #fff;
 }
 
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.current-user { margin: 0; font-size: 13px; font-weight: 700; }
+
 h1, h2 { margin: 0; letter-spacing: 0; }
 h1 { font-size: 22px; }
 h2 { font-size: 18px; }
@@ -41,6 +51,18 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; }
 .event-panel, .detail-panel { min-width: 0; }
 .event-panel h2, .detail-panel h2 { margin-bottom: 12px; }
 
+.login-panel {
+  max-width: 420px;
+  margin: 24px auto;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #c8d2d9;
+}
+
+.login-form { display: grid; gap: 14px; margin-top: 14px; }
+.login-form label { display: grid; gap: 6px; font-weight: 700; color: #435568; }
+.login-form input { width: 100%; padding: 10px; border: 1px solid #c8d2d9; border-radius: 4px; font: inherit; }
+
 .table-wrap { overflow-x: auto; border: 1px solid #c8d2d9; background: #fff; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px; border-bottom: 1px solid #e0e6ea; text-align: left; white-space: nowrap; }
@@ -61,10 +83,12 @@ video { display: block; width: 100%; min-height: 220px; background: #101820; }
 .review-actions { display: flex; gap: 10px; margin-top: 12px; }
 button { border: 0; border-radius: 4px; padding: 10px 14px; color: #fff; background: #1d6576; cursor: pointer; font-weight: 700; }
 button#reject-fall { background: #566b7c; }
+button.secondary-button { padding: 7px 10px; color: #174b5b; background: #e8eff2; }
 button:disabled { background: #a8b5bf; cursor: not-allowed; }
 
 @media (max-width: 760px) {
   .topbar { align-items: flex-start; flex-direction: column; }
+  .topbar-status { justify-content: flex-start; }
   .layout { grid-template-columns: 1fr; }
   main { padding: 16px; }
 }

@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
     QT_X11_NO_MITSHM=1 \
+    QT_QPA_FONTDIR=/usr/share/fonts/truetype/dejavu \
     YOLO_CONFIG_DIR=/tmp \
     HOME=/home/appuser
 

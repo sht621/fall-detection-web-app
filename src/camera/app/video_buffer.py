@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import subprocess
 from collections import deque
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+LOGGER = logging.getLogger(__name__)
 
 
 class VideoBuffer:
@@ -24,7 +28,7 @@ class VideoBuffer:
             self.frames.popleft()
 
     def write_clip(self, output_path: Path, event_timestamp: float) -> int:
-        """Write roughly five seconds before and after an event using a replaceable codec path."""
+        """Write roughly five seconds before and after an event."""
         selected = [
             frame
             for timestamp, frame in self.frames
@@ -35,18 +39,78 @@ class VideoBuffer:
 
         height, width = selected[0].shape[:2]
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        # TODO: switch this boundary to H.264/MP4 yuv420p after deployment codecs are decided.
+        output_path.unlink(missing_ok=True)
+
+        try:
+            self._write_h264_with_ffmpeg(selected, output_path, width, height)
+        except (FileNotFoundError, RuntimeError, BrokenPipeError) as exc:
+            LOGGER.warning("ffmpeg H.264 output failed; falling back to OpenCV mp4v: %s", exc)
+            output_path.unlink(missing_ok=True)
+            self._write_mp4v_with_opencv(selected, output_path, width, height)
+        return len(selected)
+
+    def _write_mp4v_with_opencv(
+        self,
+        frames: list[np.ndarray],
+        output_path: Path,
+        width: int,
+        height: int,
+    ) -> None:
         writer = cv2.VideoWriter(
             str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (width, height)
         )
         if not writer.isOpened():
             raise RuntimeError("could not initialize OpenCV VideoWriter")
         try:
-            for frame in selected:
+            for frame in frames:
                 if frame.shape[:2] != (height, width):
                     frame = cv2.resize(frame, (width, height))
                 writer.write(frame)
         finally:
             writer.release()
-        return len(selected)
 
+    def _write_h264_with_ffmpeg(
+        self,
+        frames: list[np.ndarray],
+        output_path: Path,
+        width: int,
+        height: int,
+    ) -> None:
+        command = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-s",
+            f"{width}x{height}",
+            "-r",
+            str(self.fps),
+            "-i",
+            "pipe:0",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert process.stdin is not None
+        try:
+            for frame in frames:
+                if frame.shape[:2] != (height, width):
+                    frame = cv2.resize(frame, (width, height))
+                process.stdin.write(np.ascontiguousarray(frame).tobytes())
+        finally:
+            process.stdin.close()
+
+        stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        return_code = process.wait()
+        if return_code != 0:
+            raise RuntimeError(stderr.strip() or f"ffmpeg exited with status {return_code}")

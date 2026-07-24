@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import sys
 import time
 import uuid
@@ -161,22 +162,29 @@ def log_torch_runtime(pose_device: str) -> str:
 
 
 def load_pose_model(model_path: str) -> Any:
-    path = Path(model_path)
-    if not path.exists():
-        raise RuntimeError(
-            f"pose model not found: {model_path}. Place YOLO26n-pose at models/yolo26n-pose.pt "
-            "on the host so it is mounted as /app/models/yolo26n-pose.pt."
-        )
-
     try:
         import ultralytics
         from ultralytics import YOLO
     except Exception as exc:
         raise RuntimeError("Ultralytics is required in the camera container") from exc
 
+    model_ref = model_path.strip() or "yolo26n-pose.pt"
+    path = Path(model_ref)
+    if path.is_absolute() or "/" in model_ref:
+        if path.exists():
+            LOGGER.info("pose model path exists; loading from %s", model_ref)
+        else:
+            LOGGER.warning(
+                "pose model path does not exist: %s. Ultralytics will still try to resolve it; "
+                "use MODEL_PATH=yolo26n-pose.pt for automatic first-run download.",
+                model_ref,
+            )
+    else:
+        LOGGER.info("loading pose model %s; Ultralytics may download it on first use", model_ref)
+
     LOGGER.info("ultralytics version=%s", getattr(ultralytics, "__version__", "unknown"))
-    model = YOLO(str(path))
-    LOGGER.info("pose model loaded from %s", model_path)
+    model = YOLO(model_ref)
+    LOGGER.info("pose model loaded from %s", model_ref)
     return model
 
 
@@ -339,7 +347,7 @@ def main() -> None:
     camera_width = env_int("CAMERA_WIDTH", 640)
     camera_height = env_int("CAMERA_HEIGHT", 480)
     process_fps = env_float("PROCESS_FPS", 10.0)
-    model_path = os.getenv("MODEL_PATH", "/app/models/yolo26n-pose.pt")
+    model_path = os.getenv("MODEL_PATH", "yolo26n-pose.pt")
     pose_device_env = os.getenv("POSE_DEVICE", "0")
     pose_confidence = env_float("POSE_CONFIDENCE", 0.5)
     pose_image_size = env_int("POSE_IMAGE_SIZE", 640)
@@ -347,6 +355,11 @@ def main() -> None:
     max_read_failures = env_int("MAX_CAMERA_READ_FAILURES", 10)
     simulate_fall = env_flag("SIMULATE_FALL")
     simulate_after = env_float("SIMULATE_FALL_AFTER_SECONDS", 5.0)
+    fall_rules_enabled = env_flag("FALL_RULES_ENABLED")
+    fall_candidate_seconds = env_float("FALL_CANDIDATE_SECONDS", 1.0)
+    fall_bbox_aspect_threshold = env_float("FALL_BBOX_ASPECT_THRESHOLD", 1.15)
+    fall_torso_angle_threshold = env_float("FALL_TORSO_ANGLE_THRESHOLD", 60.0)
+    status_log_seconds = env_float("STATUS_LOG_SECONDS", 5.0)
     output_dir = Path(os.getenv("CAMERA_OUTPUT_DIR", "/app/output"))
 
     if process_fps <= 0:
@@ -354,13 +367,26 @@ def main() -> None:
 
     api_client = APIClient(os.getenv("SERVER_BASE_URL", "http://server:8000"), os.getenv("CAMERA_API_TOKEN", ""))
     capture: cv2.VideoCapture | None = None
+    stop_requested = False
+
+    def request_shutdown(signum: int, _frame: Any) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+        LOGGER.info("shutdown requested by signal %s", signum)
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
     try:
         ensure_display_available(show_window)
         pose_device = log_torch_runtime(pose_device_env)
         model = load_pose_model(model_path)
         capture = open_camera(camera_device, camera_width, camera_height)
 
-        detector = FallDetector()
+        detector = FallDetector(
+            candidate_seconds=fall_candidate_seconds,
+            bbox_aspect_threshold=fall_bbox_aspect_threshold,
+            torso_angle_threshold=fall_torso_angle_threshold,
+        )
         buffer = VideoBuffer(fps=process_fps)
         started_at = time.monotonic()
         next_process_at = time.perf_counter()
@@ -370,9 +396,16 @@ def main() -> None:
         pending_event: tuple[str, float] | None = None
         processing_fps = 0.0
         last_processed_at: float | None = None
+        last_status_log_at = time.monotonic()
 
-        LOGGER.info("camera processing started camera_id=%s process_fps=%.2f show_window=%s", camera_id, process_fps, show_window)
-        while True:
+        LOGGER.info(
+            "camera processing started camera_id=%s process_fps=%.2f show_window=%s fall_rules_enabled=%s",
+            camera_id,
+            process_fps,
+            show_window,
+            fall_rules_enabled,
+        )
+        while not stop_requested:
             now = time.perf_counter()
             if now < next_process_at:
                 time.sleep(min(0.02, next_process_at - now))
@@ -399,11 +432,24 @@ def main() -> None:
                 detections, inference_ms = [], 0.0
 
             primary = select_primary_person(detections)
-            keypoints = primary.keypoints_xy if primary is not None else None
+            keypoints = (
+                {"xy": primary.keypoints_xy, "confidence": primary.keypoints_confidence}
+                if primary is not None
+                else None
+            )
             bbox = primary.bbox if primary is not None else None
 
-            # TODO: connect real rule thresholds later. Pose inference alone must not emit fall events.
-            detected = detector.update(keypoints=keypoints, bbox=bbox, timestamp=timestamp)
+            detected = detector.update(keypoints=keypoints, bbox=bbox, timestamp=timestamp) if fall_rules_enabled else False
+
+            if timestamp - last_status_log_at >= status_log_seconds:
+                LOGGER.info(
+                    "pose loop status process_fps=%.1f inference_ms=%.1f persons=%s device=%s",
+                    processing_fps,
+                    inference_ms,
+                    len(detections),
+                    pose_device,
+                )
+                last_status_log_at = timestamp
 
             keyboard_fall = False
             if show_window:
@@ -447,8 +493,6 @@ def main() -> None:
                     LOGGER.exception("could not create or upload video for %s", event_id)
                 pending_event = None
 
-    except KeyboardInterrupt:
-        LOGGER.info("normal shutdown requested by Ctrl+C")
     finally:
         api_client.close()
         if capture is not None:

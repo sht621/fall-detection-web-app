@@ -14,6 +14,11 @@ services:
     environment:
       DATABASE_PATH: ${DATABASE_PATH:-/data/fall_detection.sqlite3}
       VIDEO_DIR: ${VIDEO_DIR:-/data/videos}
+      MAX_VIDEO_UPLOAD_BYTES: ${MAX_VIDEO_UPLOAD_BYTES:-52428800}
+      MONITOR_USERNAME: ${MONITOR_USERNAME:-monitor}
+      MONITOR_PASSWORD_HASH: ${MONITOR_PASSWORD_HASH:-}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     ports:
       - "${SERVER_PORT:-8000}:8000"
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
@@ -40,17 +45,24 @@ services:
       CAMERA_HEIGHT: ${CAMERA_HEIGHT:-480}
       SERVER_BASE_URL: ${SERVER_BASE_URL:-http://server:8000}
       PROCESS_FPS: ${PROCESS_FPS:-10}
-      MODEL_PATH: ${MODEL_PATH:-/app/models/yolo26n-pose.pt}
+      MODEL_PATH: ${MODEL_PATH:-yolo26n-pose.pt}
       POSE_DEVICE: ${POSE_DEVICE:-0}
       POSE_CONFIDENCE: ${POSE_CONFIDENCE:-0.5}
       POSE_IMAGE_SIZE: ${POSE_IMAGE_SIZE:-640}
       SHOW_WINDOW: ${SHOW_WINDOW:-true}
       MAX_CAMERA_READ_FAILURES: ${MAX_CAMERA_READ_FAILURES:-10}
       SIMULATE_FALL: ${SIMULATE_FALL:-true}
+      FALL_RULES_ENABLED: ${FALL_RULES_ENABLED:-false}
+      FALL_CANDIDATE_SECONDS: ${FALL_CANDIDATE_SECONDS:-1.0}
+      FALL_BBOX_ASPECT_THRESHOLD: ${FALL_BBOX_ASPECT_THRESHOLD:-1.15}
+      FALL_TORSO_ANGLE_THRESHOLD: ${FALL_TORSO_ANGLE_THRESHOLD:-60.0}
       DISPLAY: ${DISPLAY:-:0}
+      QT_QPA_FONTDIR: ${QT_QPA_FONTDIR:-/usr/share/fonts/truetype/dejavu}
     depends_on:
       - server
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - "${VIDEO_GID:-44}"
     volumes:
       - ./src/camera/app:/app/app
       - ./data/camera-output:/app/output
