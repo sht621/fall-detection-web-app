@@ -1,4 +1,4 @@
-"""FastAPI application for camera events, videos, SSE, and a monitor page."""
+"""転倒検知イベント、動画、SSE、監視画面を扱うFastAPIアプリ。"""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def require_camera_token(authorization: str | None = Header(default=None)) -> No
 
 
 def safe_video_filename(event_id: str) -> str:
-    # Do not use the multipart filename supplied by the camera.
+    # cameraが送ったファイル名は信頼せず、server側で保存名を決める。
     return f"{re.sub(r'[^A-Za-z0-9_-]', '_', event_id)}.mp4"
 
 
@@ -180,7 +180,7 @@ def get_video(event_id: str, _: AuthUser = Depends(get_current_user)) -> FileRes
     video_path = Path(str(row["video_path"]))
     if not video_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video file not found")
-    # Starlette FileResponse handles byte ranges, which is enough for these short review clips.
+    # 短い確認動画なので、Range対応はFileResponseに任せる。
     return FileResponse(video_path, media_type="video/mp4", filename=f"{event_id}.mp4")
 
 

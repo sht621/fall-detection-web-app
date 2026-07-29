@@ -1,4 +1,4 @@
-"""In-process SSE fan-out for the required single Uvicorn worker."""
+"""単一Uvicorn worker前提のメモリ上SSE配信。"""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ class SSEBroker:
                     event_id, event_name, data = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield self._format_event(event_id, event_name, data)
                 except TimeoutError:
+                    # プロキシやブラウザに切断扱いされにくいよう定期コメントを流す。
                     yield ": keep-alive\n\n"
         finally:
             self._subscribers.discard(queue)
@@ -37,4 +38,3 @@ class SSEBroker:
     @staticmethod
     def _format_event(event_id: int, event_name: str, data: dict[str, Any]) -> str:
         return f"event: {event_name}\nid: {event_id}\ndata: {json.dumps(data)}\n\n"
-

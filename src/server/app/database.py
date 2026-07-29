@@ -1,4 +1,4 @@
-"""SQLite access kept deliberately small for the single-server deployment."""
+"""単一server構成で使うSQLiteアクセス処理。"""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ class Database:
         self, event_id: str, review_result: str, reviewed_by: str
     ) -> dict[str, Any] | None:
         reviewed_at = now_iso()
-        # Both current state and audit history belong to the same transaction.
+        # 確認結果の更新と履歴追加を一括で反映する。
         with self._connect() as connection:
             cursor = connection.execute(
                 """

@@ -1,4 +1,4 @@
-"""Raw-frame ring buffer used to build a clip around an event."""
+"""転倒前後の元フレームを保持するリングバッファ。"""
 
 from __future__ import annotations
 
@@ -21,14 +21,14 @@ class VideoBuffer:
         self.frames: deque[tuple[float, np.ndarray]] = deque()
 
     def add_frame(self, timestamp: float, frame: np.ndarray) -> None:
-        """Store the unannotated frame; display overlays are made on a separate copy."""
+        """描画入り映像ではなく、確認用の元フレームだけを保持する。"""
         self.frames.append((timestamp, frame.copy()))
         cutoff = timestamp - (self.pre_seconds + self.post_seconds + 2.0)
         while self.frames and self.frames[0][0] < cutoff:
             self.frames.popleft()
 
     def write_clip(self, output_path: Path, event_timestamp: float) -> int:
-        """Write roughly five seconds before and after an event."""
+        """検知時刻を中心に前後の短い確認動画を書き出す。"""
         selected = [
             frame
             for timestamp, frame in self.frames

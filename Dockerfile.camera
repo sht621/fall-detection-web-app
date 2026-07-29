@@ -13,8 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     YOLO_CONFIG_DIR=/tmp \
     HOME=/home/appuser
 
-# Keep the existing CUDA/X11-oriented image choice so USB-camera development can
-# use the same container later; the dummy mode does not require a physical camera.
+# CUDAとX11を使うUSBカメラ実行環境として必要な最小パッケージを入れる。
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     ffmpeg \

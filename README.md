@@ -1,144 +1,196 @@
 # fall-detection-web-app
 
-USBカメラ映像をYOLO poseで処理し、転倒イベント、FastAPI/SQLite、SSE、監視画面、確認結果保存までを確認する最小構成です。ROS、WebSocket、Redis は使用しません。
+大学院科目「ネットワークプログラミング特論」の最終課題として作成した、転倒検知イベント通知・映像確認Webシステムです。
+
+USBカメラ映像からYOLO-Poseで人物のBBoxとキーポイントを取得し、簡易的なルールベース処理で転倒を判定します。転倒検知時は、通知を遅らせないために検知情報を先にWebサーバへ送信し、その後リングバッファから転倒前後のMP4動画を生成して送信します。監視者はブラウザで通知を受け取り、動画確認、転倒/誤検知の登録、記録削除を行います。
+
+研究用の高精度な転倒検知モデルではなく、授業課題用にネットワーク通信、SSE通知、動画配信、SQLite保存、認証を一通り確認するための簡易実装です。ROS、WebSocket、Redis、React、Vueは使用していません。
+
+## システム構成
 
 ```text
-camera container -- REST --> FastAPI + SQLite -- SSE --> browser
-       |                         |
-       +-- MP4 upload ---------->+-- video storage
+camera container
+  USB camera -> OpenCV -> YOLO-Pose -> rule based fall detection
+      |             |
+      |             +-> local OpenCV preview
+      |
+      +-- PUT detection JSON ------------+
+      +-- PUT MP4 video -----------------+
+                                         v
+server container: FastAPI + SQLite + SSE + video files
+      |
+      +-- HTML/CSS/JavaScript + REST + SSE
+      v
+browser monitor
+  notification -> list -> video review -> PATCH review / DELETE record
 ```
 
-## 起動方法
+開発時は `camera` と `server` を同じDocker Compose上で動かします。監視画面、REST API、SSE、動画配信は同じFastAPIサーバから配信する同一オリジン構成です。
 
-1. 永続化ディレクトリを作成します。
+## ディレクトリ構成
 
-   ```bash
-   mkdir -p data/camera-output models
-   ```
+```text
+.
+├── src/
+│   ├── camera/app/
+│   │   ├── main.py
+│   │   ├── fall_detector.py
+│   │   ├── video_buffer.py
+│   │   └── api_client.py
+│   └── server/app/
+│       ├── main.py
+│       ├── database.py
+│       ├── auth.py
+│       ├── sse.py
+│       └── static/
+│           ├── monitor.html
+│           ├── app.js
+│           └── style.css
+├── Dockerfile.camera
+├── Dockerfile.server
+├── compose.yaml
+├── .env.example
+├── .gitignore
+└── README.md
+```
 
-   `.env` は必須ではありません。設定を変える場合だけ `cp .env.example .env` して編集します。
+`data/`、`models/*.pt`、`.env`、キャッシュ類は実行時データまたは環境固有ファイルのため提出対象外です。
 
-   ホストの UID/GID が 1000 以外なら、`.env` の `HOST_UID` と `HOST_GID` を `id -u` / `id -g` の値に合わせます。USB カメラのグループ ID が 44 以外なら、`VIDEO_GID` を `getent group video | cut -d: -f3` の値に合わせます。
+## 主要ファイルと役割
 
-2. server と camera をまとめて起動します。
+| ファイル | 役割 |
+| --- | --- |
+| `src/camera/app/main.py` | USBカメラ取得、YOLO-Pose推論、ローカル描画、転倒判定呼び出し、イベント送信 |
+| `src/camera/app/fall_detector.py` | `NORMAL`、`CANDIDATE`、`FALL_DETECTED`、`COOLDOWN` を持つ簡易転倒判定 |
+| `src/camera/app/video_buffer.py` | 元フレームのリングバッファと、転倒前後MP4の生成 |
+| `src/camera/app/api_client.py` | HTTPXによるカメラからサーバへのPUT送信 |
+| `src/server/app/main.py` | FastAPIアプリ、REST API、SSE、動画保存・配信 |
+| `src/server/app/database.py` | SQLiteの初期化、検知記録、確認履歴、削除処理 |
+| `src/server/app/auth.py` | ログイン、署名付きCookie、CSRF検証 |
+| `src/server/app/sse.py` | 単一Uvicorn worker前提のメモリ上SSE配信 |
+| `src/server/app/static/monitor.html` | ログイン画面と監視画面のHTML |
+| `src/server/app/static/app.js` | EventSource接続、一覧更新、動画再生、PATCH/DELETE |
+| `src/server/app/static/style.css` | 監視画面の表示スタイル |
+| `compose.yaml` | `server` と `camera` の起動設定 |
+| `Dockerfile.camera` | PyTorch CUDA、Ultralytics、OpenCV GUI、FFmpeg環境 |
+| `Dockerfile.server` | FastAPI、Uvicorn、SQLite、multipart受信環境 |
 
-   ```bash
-   docker compose up --build
-   ```
+## 使用技術と実装箇所
 
-3. ブラウザで [http://localhost:8000/monitor](http://localhost:8000/monitor) を開きます。
+| 技術 | 用途 | 主な実装ファイル |
+| --- | --- | --- |
+| REST API | 検知登録、動画登録、一覧取得、確認結果更新、削除 | `src/server/app/main.py`, `src/camera/app/api_client.py`, `src/server/app/static/app.js` |
+| Server-Sent Events | 転倒検知と動画準備完了の通知 | `src/server/app/sse.py`, `src/server/app/main.py`, `src/server/app/static/app.js` |
+| FastAPI / Uvicorn | Webサーバ、API、静的ファイル、動画配信 | `src/server/app/main.py`, `Dockerfile.server` |
+| SQLite | 検知記録と確認履歴の保存 | `src/server/app/database.py` |
+| HTML5 Video | MP4動画のブラウザ再生 | `src/server/app/static/monitor.html`, `src/server/app/static/app.js` |
+| Cookie / CSRF | ログイン状態管理と状態変更APIの保護 | `src/server/app/auth.py`, `src/server/app/main.py`, `src/server/app/static/app.js` |
+| OpenCV | USBカメラ取得、ローカル描画、動画書き出し | `src/camera/app/main.py`, `src/camera/app/video_buffer.py` |
+| Ultralytics / PyTorch | YOLO-Pose推論とCUDA利用 | `src/camera/app/main.py`, `Dockerfile.camera` |
+| HTTPX | cameraからserverへのHTTP送信 | `src/camera/app/api_client.py` |
 
-   初期ログイン:
+FastAPI、Uvicorn、OpenCV、Ultralytics、PyTorch、HTTPXは外部ライブラリです。自作部分は、これらを使ったカメラ処理、API設計、DB保存、SSE通知、ブラウザ操作です。
 
-   ```text
-   ユーザー名: admin
-   パスワード: admin
-   ```
+## 処理の流れ
 
-camera 側は `CAMERA_DEVICE=/dev/video0` を OpenCV の V4L2 バックエンドで開き、`MODEL_PATH=yolo26n-pose.pt` の YOLO pose モデルで人物の BBox とスケルトンをローカル画面へ描画します。モデルは Ultralytics が初回起動時に自動ダウンロードします。`q` または `ESC` で正常終了します。
+1. `camera` が `CAMERA_DEVICE` のUSBカメラをOpenCVで開く。
+2. YOLO-Poseで人物BBoxとキーポイントを取得する。
+3. 最大BBoxの人物を転倒判定対象にする。
+4. `FallDetector` がBBox横長度や胴体角度を使って簡易判定する。
+5. 転倒検知時、`PUT /api/camera/detections/{event_id}` で検知情報を先に送信する。
+6. serverはSQLiteの `detections` に記録し、SSEで `fall_detected` を配信する。
+7. cameraはリングバッファから転倒前後の元フレームをMP4化する。
+8. `PUT /api/camera/detections/{event_id}/video` で動画を後から送信する。
+9. serverは動画を保存し、SQLiteの動画状態を `READY` に更新し、SSEで `video_ready` を配信する。
+10. ブラウザはEventSourceで通知を受け、一覧を再取得し、HTML5 `video` で動画を再生する。
+11. 監視者は `PATCH /api/detections/{event_id}/review` で確認結果を登録する。
+12. 必要に応じて `DELETE /api/detections/{event_id}` で記録と保存動画を削除する。
 
-簡易ルールが転倒候補を検出すると、イベント登録、前後動画保存、監視画面へのSSE通知を行います。実環境では閾値調整が必要です。
+## REST API一覧
 
-複数人物が映った場合、画面上は検出された人物を描画しますが、転倒判定の入力には BBox 面積が最大の1人だけを使います。人物追跡や ID 管理はこの課題では扱いません。
+| メソッド | パス | 用途 | 主な呼び出し元 |
+| --- | --- | --- | --- |
+| GET | `/health` | server起動確認 | 手動確認、ヘルスチェック |
+| GET | `/monitor` | 監視画面HTML配信 | ブラウザ |
+| GET | `/api/events` | SSE接続 | ブラウザ `EventSource` |
+| POST | `/api/login` | ブラウザ利用者ログイン | `app.js` |
+| POST | `/api/logout` | ログアウト | `app.js` |
+| GET | `/api/me` | ログイン状態確認 | `app.js` |
+| PUT | `/api/camera/detections/{event_id}` | 検知情報登録 | `camera/app/api_client.py` |
+| PUT | `/api/camera/detections/{event_id}/video` | MP4動画アップロード | `camera/app/api_client.py` |
+| GET | `/api/detections` | 検知一覧取得 | `app.js` |
+| GET | `/api/detections/{event_id}` | 検知詳細取得 | `app.js` |
+| GET | `/api/detections/{event_id}/video` | 保存動画取得 | HTML5 `video` |
+| PATCH | `/api/detections/{event_id}/review` | `FALL_CONFIRMED` / `NO_FALL` の登録 | `app.js` |
+| DELETE | `/api/detections/{event_id}` | 検知記録と保存動画の削除 | `app.js` |
 
-バックグラウンドで起動する場合は次を使います。
+## SSE通知
+
+| イベント名 | 送信タイミング | ブラウザ側の動作 |
+| --- | --- | --- |
+| `fall_detected` | 新しい検知情報をSQLiteへ保存した後 | 対象イベントを再取得し、一覧を更新する |
+| `video_ready` | MP4保存とDB更新が終わった後 | 対象イベントを再取得し、動画再生可能状態へ更新する |
+
+SSEは `src/server/app/sse.py` のメモリ上キューで購読者へ配信します。Redisなどの外部ブローカーは使っていないため、Uvicornは単一worker前提です。ブラウザ側は標準の `EventSource` を使い、接続復帰時には一覧を再取得します。Last-Event-IDを使った高度な再送保証は実装していません。
+
+## SQLite
+
+SQLiteはPython標準ライブラリ `sqlite3` で扱います。初回起動時に `src/server/app/database.py` がテーブルを作成します。
+
+| テーブル | 用途 |
+| --- | --- |
+| `detections` | 検知ID、カメラID、検知時刻、動画状態、確認状態、動画パスなどを保存 |
+| `review_logs` | 確認結果の履歴を保存 |
+
+確認結果を登録する時は、`detections` の現在状態更新と `review_logs` への履歴追加を同じSQLite接続のトランザクション内で行います。
+
+## 認証とCSRF対策
+
+- camera APIは `Authorization: Bearer <CAMERA_API_TOKEN>` を確認する。
+- ブラウザ利用者は `/api/login` でログインする。
+- ログイン状態は署名付きCookieで保持する。
+- イベント一覧、詳細、動画、SSEは未ログイン状態では拒否される。
+- PATCH、DELETE、ログアウトでは `X-CSRF-Token` も検証する。
+- `/monitor` のHTML自体は配信されるが、未ログイン時はログインフォームだけを表示し、記録や動画は認証済みAPIから取得する。
+
+これは授業課題デモ用の簡易認証です。HTTPS証明書構築や本番運用向けの厳密な認証は対象外です。
+
+## 環境変数
+
+`.env.example` を `.env` にコピーし、`xxxx` の値を実行環境用に置き換えてください。`.env` はGit管理対象外、提出対象外です。
 
 ```bash
-docker compose up -d --build
-docker compose logs -f
+cp .env.example .env
 ```
 
-起動を止めるには `docker compose down` を使用します。SQLite と動画はホスト側の `data/` に残ります。
+主な環境変数:
 
-## USB カメラと YOLO pose
+| 変数 | 用途 |
+| --- | --- |
+| `CAMERA_API_TOKEN` | camera API用Bearerトークン |
+| `SESSION_SECRET` | 署名付きCookie用の秘密値 |
+| `MONITOR_USERNAME` | 監視画面ログインユーザー名 |
+| `MONITOR_PASSWORD_HASH` | 監視画面ログインパスワードのPBKDF2ハッシュ |
+| `CAMERA_DEVICE` | コンテナ内のカメラデバイス |
+| `HOST_CAMERA_DEVICE` | ホスト側のカメラデバイス |
+| `CAMERA_WIDTH`, `CAMERA_HEIGHT` | 要求するカメラ解像度 |
+| `PROCESS_FPS` | camera処理FPS |
+| `MODEL_PATH` | YOLO-Poseモデル名またはパス |
+| `POSE_DEVICE` | YOLO推論デバイス。GPUなら `0`、CPUなら `cpu` |
+| `SHOW_WINDOW` | OpenCVウィンドウ表示の有効/無効 |
+| `DATABASE_PATH` | SQLite保存先 |
+| `VIDEO_DIR` | server側動画保存先 |
 
-モデルは通常、初回起動時に Ultralytics が自動ダウンロードします。提出時にモデルファイルを同梱する必要はありません。
-
-ネットワークが使えない環境で事前配置したい場合だけ、ホスト側の `models/` に置いて `.env` の `MODEL_PATH` を `/app/models/yolo26n-pose.pt` へ変更します。
-
-```bash
-mkdir -p models
-# 任意: オフライン実行したい場合だけ models/yolo26n-pose.pt を配置
-```
-
-ホスト側で USB カメラを確認します。
-
-```bash
-v4l2-ctl --list-devices
-ls -l /dev/video*
-getent group video
-```
-
-X11 表示を使う場合は、現在のローカルユーザだけを許可します。
-
-```bash
-xhost +SI:localuser:$(id -un)
-```
-
-確認後に許可を戻す場合は次を実行します。
-
-```bash
-xhost -SI:localuser:$(id -un)
-```
-
-camera だけを起動したい場合は次を使います。
-
-```bash
-docker compose up --build camera
-```
-
-バックグラウンドで起動する場合は次を使います。
-
-```bash
-docker compose up -d --build camera
-docker compose logs -f camera
-```
-
-ヘッドレス環境では `.env` で `SHOW_WINDOW=false` を指定します。この場合も USB カメラ取得と YOLO pose 推論ループは実行されますが、`cv2.imshow()` は呼びません。
-
-転倒判定は簡易ルールです。実際の教室やカメラ位置に合わせて `.env` の `FALL_CANDIDATE_SECONDS`、`FALL_BBOX_ASPECT_THRESHOLD`、`FALL_TORSO_ANGLE_THRESHOLD` を調整します。
-
-確認する項目:
-
-- USB カメラが開けた
-- 実画像が表示された
-- YOLO26n-pose が読み込まれた
-- 初回起動時に必要ならモデルが自動ダウンロードされた
-- PyTorch から CUDA と GPU 名がログに出た
-- 人物 BBox とスケルトンが描画された
-- 通常時は BBox とスケルトンが緑、転倒検知中の主要人物だけ赤で表示された
-- 人物がいない状態でも停止しない
-- `q`、`ESC`、`Ctrl+C` で終了できた
-- `SHOW_WINDOW=false` でもループが動作した
-
-## 画面と API
-
-- `GET /monitor`: 監視者用の一覧、動画再生、確認画面
-- `GET /api/events`: `fall_detected` と `video_ready` を流す SSE
-- `PUT /api/camera/detections/{event_id}`: カメラの転倒検知登録
-- `PUT /api/camera/detections/{event_id}/video`: MP4 動画の送信
-- `GET /api/detections`: 新しい順のイベント一覧
-- `GET /api/detections/{event_id}`: イベント詳細
-- `GET /api/detections/{event_id}/video`: 保存済み動画
-- `PATCH /api/detections/{event_id}/review`: `FALL_CONFIRMED` または `NO_FALL` の登録
-- `DELETE /api/detections/{event_id}`: イベントと保存動画の削除
-
-カメラ API は `Authorization: Bearer <CAMERA_API_TOKEN>` を必要とします。監視者操作はログイン後のセッションCookieとCSRFトークンで保護します。
-
-動画アップロードは開発用に `MAX_VIDEO_UPLOAD_BYTES=52428800` のサイズ上限を持ちます。動画の中身の厳密な検証は今後の調整対象です。
-
-ログイン画面と確認画面はどちらも `/monitor` で配信されます。未ログイン時はログインフォームだけを表示し、ログイン後にイベント一覧、動画再生、確認ボタン、削除ボタンを表示します。小規模な監視画面なのでページ遷移を増やさず、API側のセッション認証でデータを保護します。
-
-通知はWeb Pushではなく、監視画面を開いてSSE接続中のブラウザに表示される画面内通知です。転倒イベント登録時に `fall_detected`、動画保存完了時に `video_ready` を受け取り、一覧を即時更新します。ブラウザを閉じている場合や未ログインの場合は通知されません。
-
-## 監視画面の認証
-
-既定ではログイン画面が表示されます。初期値は授業課題用のダミー認証なので、共有・提出前に必要ならパスワードハッシュと `SESSION_SECRET` を変更します。
+パスワードハッシュは次のように作成できます。入力したパスワードは画面に表示されません。
 
 ```bash
 python3 - <<'PY'
-import base64, hashlib, secrets
-password = b"ここに新しいパスワード"
+import base64
+import getpass
+import hashlib
+import secrets
+
+password = getpass.getpass("monitor password: ").encode("utf-8")
 salt = secrets.token_bytes(16)
 iterations = 260000
 digest = hashlib.pbkdf2_hmac("sha256", password, salt, iterations)
@@ -150,47 +202,110 @@ print("pbkdf2_sha256:{}:{}:{}".format(
 PY
 ```
 
-`.env` を次のように変更します。
+## Dockerによる起動方法
 
-```text
-SESSION_SECRET=32文字以上のランダム文字列
-MONITOR_USERNAME=admin
-MONITOR_PASSWORD_HASH=上で生成した値
-SESSION_COOKIE_SECURE=false
+永続化ディレクトリを作成します。
+
+```bash
+mkdir -p data/camera-output models
 ```
 
-ローカルHTTPで確認する間は `SESSION_COOKIE_SECURE=false` のままにします。HTTPSで公開する場合は `SESSION_COOKIE_SECURE=true` に変更します。
+`.env` を作成し、秘密値を置き換えます。
 
-ログインを省略して動作確認したい場合だけ、`.env` で `AUTH_DISABLED=true` にします。
+```bash
+cp .env.example .env
+```
 
-## ファイル構成
+ホストのUID/GIDが1000以外の場合は、`.env` の `HOST_UID` と `HOST_GID` を `id -u` / `id -g` の値に合わせます。USBカメラのグループIDが44以外の場合は、`VIDEO_GID` を `getent group video | cut -d: -f3` の値に合わせます。
 
-- `src/camera/app/main.py`: USB カメラ取得、YOLO pose 推論、BBox/スケルトン描画、転倒イベント送信の入口
-- `src/camera/app/fall_detector.py`: timestamp ベースの簡易転倒判定状態機械
-- `src/camera/app/video_buffer.py`: 元フレームだけを保持するリングバッファと FFmpeg pipe による H.264/yuv420p MP4 出力
-- `src/camera/app/api_client.py`: Bearer 認証付き HTTPX クライアントと簡易再試行
-- `src/server/app/main.py`: FastAPI の API、動画保存、SSE 通知
-- `src/server/app/database.py`: sqlite3 のテーブル初期化と検知・確認結果の永続化
-- `src/server/app/auth.py`: 開発用固定ユーザ、署名付きセッションCookie、CSRF検証
-- `src/server/app/sse.py`: 単一 Uvicorn ワーカー向けの in-process SSE 配信
-- `src/server/app/static/`: Vanilla JavaScript の監視画面
-- `Dockerfile.camera`, `Dockerfile.server`: ルート直下の各コンテナ実行環境
+X11表示を使う場合は、現在のローカルユーザーだけを許可します。
 
-## 手動確認・調整が必要な項目
+```bash
+xhost +SI:localuser:$(id -un)
+```
 
-- 実カメラ画面で BBox とスケルトンが人物に合っているか確認
-- 実際の教室、照明、カメラ角度で `POSE_CONFIDENCE` と `POSE_IMAGE_SIZE` を調整
-- `FALL_CANDIDATE_SECONDS`、`FALL_BBOX_ASPECT_THRESHOLD`、`FALL_TORSO_ANGLE_THRESHOLD` を実映像で調整
-- 簡易ルールで誤検知や見逃しがどの程度あるか確認
-- X11 表示で `q` / `ESC` による終了操作を実機画面で確認
-- 初回起動時にネットワーク経由で `yolo26n-pose.pt` を自動ダウンロードできるか確認。オフライン提出環境では `models/yolo26n-pose.pt` を置き、`MODEL_PATH=/app/models/yolo26n-pose.pt` に変更
-- 保存された MP4 が提出先・確認用ブラウザで再生できるか確認
-- ログイン、確認結果PATCH、ログアウトが期待どおり動くか確認
-- HTTPSで公開する場合は `SESSION_COOKIE_SECURE=true` とCookie動作を確認
+起動します。
 
-## 残っている発展項目
+```bash
+docker compose up --build
+```
 
-- 複数カメラ管理、heartbeat
-- 永続再送キュー、SSE 再送保証、複数 Uvicorn ワーカー対応
-- HTTPS、音声保存、自動動画削除、Web Push
-- OpenCV/Qt のフォント警告整理。現状は表示に致命的な問題がないため後回し
+ブラウザで次を開きます。
+
+```text
+http://localhost:8000/monitor
+```
+
+終了します。
+
+```bash
+docker compose down
+```
+
+X11許可を戻す場合:
+
+```bash
+xhost -SI:localuser:$(id -un)
+```
+
+ヘッドレス環境では `.env` で `SHOW_WINDOW=false` を指定します。
+
+## 動作確認方法
+
+静的確認:
+
+```bash
+python -m compileall src
+docker compose config --quiet
+```
+
+server確認:
+
+- `docker compose up --build server`
+- `GET /health` が `{"status":"ok"}` を返す
+- `/monitor` が取得できる
+- 未ログインで `/api/detections` が拒否される
+- ログイン後、一覧、動画取得、PATCH、DELETEが実行できる
+- Bearerなしのcamera APIが拒否される
+- 正しいBearerで検知登録と動画アップロードができる
+- SQLiteの `detections` と `review_logs` に保存される
+- CSRFなしのPATCH/DELETEが拒否される
+
+camera確認:
+
+- `docker compose up --build camera`
+- USBカメラが開ける
+- YOLO-Poseモデルが読み込まれる
+- CUDAが利用される
+- BBoxとスケルトンがローカル画面に表示される
+- 通常時は緑、転倒検知中の主要人物だけ赤で表示される
+- 転倒検知時に検知情報と動画がserverへ送信される
+- `q`、`ESC`、`Ctrl+C` で終了できる
+
+YOLOモデルは通常 `MODEL_PATH=yolo26n-pose.pt` としておき、Ultralyticsの初回自動ダウンロードを利用します。オフライン実行したい場合だけ `models/` に重みを置き、`MODEL_PATH=/app/models/yolo26n-pose.pt` に変更します。
+
+## 制限事項
+
+- 転倒判定は簡易ルールであり、カメラ位置や照明に応じた閾値調整が必要です。
+- 複数人物追跡や人物ID管理は行いません。
+- SSEは単一Uvicorn worker前提で、再送保証はありません。
+- HTTPS、Web Push、Redis、WebSocket、本番用認証は実装していません。
+- 動画検証、自動削除、永続再送キューは実装していません。
+
+## 提出対象外ファイル
+
+以下は提出ZIPに含めません。
+
+- `.git/`
+- `.env`
+- `data/`
+- `models/*.pt`
+- `__pycache__/`
+- `.pytest_cache/`
+- `*.pyc`
+- `*.log`
+- `.DS_Store`
+- `.vscode/`
+- `.idea/`
+
+`data/` にはSQLite実データや生成MP4が入ります。`models/*.pt` は外部モデル重みです。どちらも自作ソースコードではありません。

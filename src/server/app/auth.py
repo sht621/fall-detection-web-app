@@ -1,4 +1,4 @@
-"""Session-cookie authentication for the monitor UI."""
+"""監視画面用の署名付きCookie認証。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from typing import Any
 from fastapi import Header, HTTPException, Request, Response, status
 
 SESSION_COOKIE_NAME = "fall_monitor_session"
-CSRF_HEADER_NAME = "x-csrf-token"
 
 
 @dataclass(frozen=True)
@@ -25,7 +24,7 @@ class AuthUser:
 
 
 def auth_disabled() -> bool:
-    return os.getenv("AUTH_DISABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("AUTH_DISABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def session_cookie_secure() -> bool:
@@ -55,16 +54,6 @@ def password_hash() -> str:
     if not value:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="monitor password hash is not configured")
     return value
-
-
-def make_password_hash(password: str, iterations: int = 260_000) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
-    return "pbkdf2_sha256:{}:{}:{}".format(
-        iterations,
-        _b64encode(salt),
-        _b64encode(digest),
-    )
 
 
 def verify_password(password: str, encoded: str) -> bool:
@@ -139,12 +128,14 @@ def require_csrf(
 ) -> None:
     if auth_disabled():
         return
+    # Cookieだけで更新操作が実行されないよう、CSRFトークンも検証する。
     user = get_current_user(request)
     if not x_csrf_token or not hmac.compare_digest(x_csrf_token, user.csrf_token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid CSRF token")
 
 
 def _sign_payload(payload: dict[str, Any]) -> str:
+    # サーバ側にセッション表を持たず、Cookieの改ざんだけを検出する。
     body = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = hmac.new(session_secret().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
     return f"{body}.{_b64encode(signature)}"

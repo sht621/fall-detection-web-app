@@ -4,3 +4,7 @@ models/*.pt
 __pycache__/
 *.py[cod]
 .pytest_cache/
+*.log
+.DS_Store
+.vscode/
+.idea/

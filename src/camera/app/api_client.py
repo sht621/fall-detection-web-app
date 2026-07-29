@@ -1,4 +1,4 @@
-"""Small HTTP client for the camera-to-server contract."""
+"""cameraからserverへ送信するための小さなHTTPクライアント。"""
 
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ class APIClient:
             except (httpx.HTTPError, OSError) as exc:
                 if attempt == self.retries:
                     raise
+                # 一時的な通信失敗だけを短く再試行する。
                 LOGGER.warning("video upload attempt %s/%s failed: %s", attempt, self.retries, exc)
                 time.sleep(attempt)
         raise RuntimeError("unreachable retry loop")
@@ -59,7 +60,7 @@ class APIClient:
             except httpx.HTTPError as exc:
                 if attempt == self.retries:
                     raise
+                # 永続キューは持たず、課題デモ用にその場で数回だけ試す。
                 LOGGER.warning("request attempt %s/%s failed: %s", attempt, self.retries, exc)
                 time.sleep(attempt)
         raise RuntimeError("unreachable retry loop")
-

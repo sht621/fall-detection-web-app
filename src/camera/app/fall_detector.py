@@ -1,4 +1,4 @@
-"""Timestamp-based fall-detection rules kept intentionally simple."""
+"""timestamp基準の簡易転倒判定ルール。"""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class FallDetector:
         self.last_detected_at: float | None = None
 
     def update(self, keypoints: Any, bbox: Any, timestamp: float) -> bool:
-        """Return True once when the simple rules remain suspicious long enough."""
+        """疑わしい姿勢が一定時間続いた瞬間だけTrueを返す。"""
         if self.state is FallState.COOLDOWN:
             if self.last_detected_at is not None and timestamp - self.last_detected_at >= self.cooldown_seconds:
                 self.state = FallState.NORMAL
@@ -62,7 +62,7 @@ class FallDetector:
         return False
 
     def mark_detected(self, timestamp: float) -> None:
-        """Used by the separate simulation path until real rules are implemented."""
+        """送信済みイベントが連続発火しないようクールダウンへ移す。"""
         self.last_detected_at = timestamp
         self.candidate_started_at = None
         self.state = FallState.COOLDOWN
@@ -106,6 +106,5 @@ class FallDetector:
         if dx == 0.0 and dy == 0.0:
             return None
 
-        # Later calibration can add hip descent and low-posture dwell; this keeps
-        # the first rule understandable and timestamp based.
+        # 課題デモでは説明しやすいよう、胴体の傾きだけをtimestamp基準で扱う。
         return math.degrees(math.atan2(abs(dx), abs(dy)))

@@ -1,4 +1,4 @@
-"""Camera process for USB capture, YOLO pose inference, and local preview."""
+"""USBカメラ取得、YOLO-Pose推論、ローカル表示の入口。"""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ SKELETON_EDGES = (
 @dataclass
 class PoseDetection:
     bbox: tuple[float, float, float, float]
-    bbox_confidence: float
     keypoints_xy: np.ndarray
     keypoints_confidence: np.ndarray
 
@@ -228,7 +227,6 @@ def extract_pose_detections(result: Any) -> list[PoseDetection]:
         return []
 
     xyxy = as_numpy(getattr(boxes, "xyxy", None))
-    box_conf = as_numpy(getattr(boxes, "conf", None))
     kpt_xy = as_numpy(getattr(keypoints, "xy", None))
     kpt_conf = as_numpy(getattr(keypoints, "conf", None))
 
@@ -240,11 +238,9 @@ def extract_pose_detections(result: Any) -> list[PoseDetection]:
     count = min(len(xyxy), len(kpt_xy))
     detections: list[PoseDetection] = []
     for index in range(count):
-        confidence = float(box_conf[index]) if index < len(box_conf) else 0.0
         detections.append(
             PoseDetection(
                 bbox=tuple(float(v) for v in xyxy[index][:4]),
-                bbox_confidence=confidence,
                 keypoints_xy=np.asarray(kpt_xy[index], dtype=np.float32),
                 keypoints_confidence=np.asarray(kpt_conf[index], dtype=np.float32),
             )
@@ -253,7 +249,7 @@ def extract_pose_detections(result: Any) -> list[PoseDetection]:
 
 
 def select_primary_person(detections: list[PoseDetection]) -> PoseDetection | None:
-    """Current policy: use the largest bbox for future fall rules; no tracking or IDs."""
+    """人物追跡は行わず、転倒判定には画面内で最も大きい人物だけを使う。"""
     if not detections:
         return None
     return max(detections, key=lambda detection: detection.area)
@@ -440,6 +436,7 @@ def main() -> None:
             if pending_event is None and detected:
                 event_id = str(uuid.uuid4())
                 try:
+                    # 通知を遅らせないため、動画生成より先に検知情報を送信する。
                     api_client.register_detection(event_id, camera_id, utc_now())
                     LOGGER.info("registered detection %s", event_id)
                     detector.mark_detected(timestamp)
