@@ -1,5 +1,3 @@
-"""転倒前後の元フレームを保持するリングバッファ。"""
-
 from __future__ import annotations
 
 import logging
@@ -21,14 +19,14 @@ class VideoBuffer:
         self.frames: deque[tuple[float, np.ndarray]] = deque()
 
     def add_frame(self, timestamp: float, frame: np.ndarray) -> None:
-        """描画入り映像ではなく、確認用の元フレームだけを保持する。"""
+        # 確認動画に検出結果を重ねないため，描画前の元フレームを保持する．
         self.frames.append((timestamp, frame.copy()))
         cutoff = timestamp - (self.pre_seconds + self.post_seconds + 2.0)
         while self.frames and self.frames[0][0] < cutoff:
             self.frames.popleft()
 
     def write_clip(self, output_path: Path, event_timestamp: float) -> int:
-        """検知時刻を中心に前後の短い確認動画を書き出す。"""
+        # 転倒検知時刻の前後を含む短い確認動画を書き出す．
         selected = [
             frame
             for timestamp, frame in self.frames

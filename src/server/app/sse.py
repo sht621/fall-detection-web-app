@@ -1,5 +1,3 @@
-"""単一Uvicorn worker前提のメモリ上SSE配信。"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +28,7 @@ class SSEBroker:
                     event_id, event_name, data = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield self._format_event(event_id, event_name, data)
                 except TimeoutError:
-                    # プロキシやブラウザに切断扱いされにくいよう定期コメントを流す。
+                    # 接続がタイムアウトしないよう，SSEコメントを定期的に送信する．
                     yield ": keep-alive\n\n"
         finally:
             self._subscribers.discard(queue)

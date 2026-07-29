@@ -80,9 +80,9 @@ tbody tr:hover, tbody tr:focus, tbody tr.selected { background: #dff0f3; outline
 .fall_confirmed { background: #f8dce1; color: #8c1630; }
 .no_fall { background: #dcebf8; color: #1d5688; }
 
-.selected-summary { min-height: 40px; margin: 0 0 10px; color: #435568; }
+.selected-summary { min-height: 40px; margin: 0 0 10px; color: #435568; overflow-wrap: anywhere; }
 video { display: block; width: 100%; min-height: 220px; background: #101820; }
-.review-actions { display: flex; gap: 10px; margin-top: 12px; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 button { border: 0; border-radius: 4px; padding: 10px 14px; color: #fff; background: #1d6576; cursor: pointer; font-weight: 700; }
 button#reject-fall { background: #566b7c; }
 button.danger-button { background: #9b2438; }

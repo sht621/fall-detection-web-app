@@ -1,5 +1,3 @@
-"""監視画面用の署名付きCookie認証。"""
-
 from __future__ import annotations
 
 import base64
@@ -128,14 +126,14 @@ def require_csrf(
 ) -> None:
     if auth_disabled():
         return
-    # Cookieだけで更新操作が実行されないよう、CSRFトークンも検証する。
+    # Cookieは自動送信されるため，更新操作ではCSRFトークンも検証する．
     user = get_current_user(request)
     if not x_csrf_token or not hmac.compare_digest(x_csrf_token, user.csrf_token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid CSRF token")
 
 
 def _sign_payload(payload: dict[str, Any]) -> str:
-    # サーバ側にセッション表を持たず、Cookieの改ざんだけを検出する。
+    # サーバ側にセッション表を持たず，署名付きCookieの署名と有効期限を検証する．
     body = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = hmac.new(session_secret().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
     return f"{body}.{_b64encode(signature)}"

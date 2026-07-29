@@ -1,5 +1,3 @@
-"""timestamp基準の簡易転倒判定ルール。"""
-
 from __future__ import annotations
 
 import math
@@ -35,7 +33,7 @@ class FallDetector:
         self.last_detected_at: float | None = None
 
     def update(self, keypoints: Any, bbox: Any, timestamp: float) -> bool:
-        """疑わしい姿勢が一定時間続いた瞬間だけTrueを返す。"""
+        # 転倒条件が一定時間継続したときだけTrueを返す．
         if self.state is FallState.COOLDOWN:
             if self.last_detected_at is not None and timestamp - self.last_detected_at >= self.cooldown_seconds:
                 self.state = FallState.NORMAL
@@ -62,7 +60,7 @@ class FallDetector:
         return False
 
     def mark_detected(self, timestamp: float) -> None:
-        """送信済みイベントが連続発火しないようクールダウンへ移す。"""
+        # 同じ転倒を繰り返し通知しないよう，検知後はクールダウン状態へ移行する．
         self.last_detected_at = timestamp
         self.candidate_started_at = None
         self.state = FallState.COOLDOWN
@@ -106,5 +104,4 @@ class FallDetector:
         if dx == 0.0 and dy == 0.0:
             return None
 
-        # 課題デモでは説明しやすいよう、胴体の傾きだけをtimestamp基準で扱う。
         return math.degrees(math.atan2(abs(dx), abs(dy)))

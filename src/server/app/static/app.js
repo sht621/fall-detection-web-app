@@ -31,13 +31,13 @@ function formatDate(value) {
 
 function labelFor(value) {
   const labels = {
-    CAPTURING: "準備中",
-    UPLOADING: "アップロード中",
-    READY: "準備完了",
-    FAILED: "失敗",
+    CAPTURING: "生成中",
+    UPLOADING: "送信中",
+    READY: "再生可能",
+    FAILED: "処理失敗",
     UNREVIEWED: "未確認",
-    FALL_CONFIRMED: "転倒確認済み",
-    NO_FALL: "転倒ではない",
+    FALL_CONFIRMED: "転倒",
+    NO_FALL: "誤検知",
   };
   return labels[value] || value;
 }
@@ -55,9 +55,17 @@ function showNotification(message) {
   window.setTimeout(() => elements.notification.classList.remove("visible"), 4500);
 }
 
-function setConnectionStatus(connected) {
-  elements.sseStatus.textContent = connected ? "SSE 接続中" : "SSE 切断中";
-  elements.sseStatus.className = `connection ${connected ? "connected" : "disconnected"}`;
+function setConnectionStatus(status) {
+  if (status === "reconnecting") {
+    elements.sseStatus.textContent = "通知サーバーに再接続しています…";
+    elements.sseStatus.hidden = false;
+    elements.sseStatus.className = "connection disconnected";
+    return;
+  }
+
+  elements.sseStatus.textContent = "";
+  elements.sseStatus.hidden = true;
+  elements.sseStatus.className = "connection";
 }
 
 function setAuthenticated(user) {
@@ -76,7 +84,7 @@ function setUnauthenticated() {
   state.selectedId = null;
   state.eventSource?.close();
   state.eventSource = null;
-  setConnectionStatus(false);
+  setConnectionStatus("hidden");
   elements.currentUser.textContent = "";
   elements.logout.hidden = true;
   elements.layout.hidden = true;
@@ -95,7 +103,7 @@ async function loadSession() {
     setUnauthenticated();
     return false;
   }
-  if (!response.ok) throw new Error("ログイン状態を確認できませんでした。");
+  if (!response.ok) throw new Error("ログイン状態の確認に失敗しました。");
   setAuthenticated(await response.json());
   return true;
 }
@@ -106,7 +114,7 @@ async function loadDetections() {
     setUnauthenticated();
     return;
   }
-  if (!response.ok) throw new Error("イベント一覧を取得できませんでした。");
+  if (!response.ok) throw new Error("検知記録を取得できませんでした。");
   const detections = await response.json();
   state.detections = new Map();
   upsertDetections(detections);
@@ -163,12 +171,12 @@ function renderSelected() {
   elements.reject.disabled = !hasSelection;
   elements.deleteEvent.disabled = !hasSelection;
   if (!detection) {
-    elements.summary.textContent = "イベントを選択してください。";
+    elements.summary.textContent = "確認する検知記録を選択してください。";
     elements.video.removeAttribute("src");
     elements.video.load();
     return;
   }
-  elements.summary.textContent = `${detection.camera_id} / ${formatDate(detection.detected_at)} / ${labelFor(detection.video_status)}`;
+  elements.summary.textContent = `カメラ：${detection.camera_id} / 検知日時：${formatDate(detection.detected_at)} / 動画：${labelFor(detection.video_status)}`;
   if (detection.video_status === "READY") {
     const source = `/api/detections/${encodeURIComponent(detection.event_id)}/video`;
     if (elements.video.getAttribute("src") !== source) {
@@ -193,19 +201,21 @@ async function submitReview(reviewResult) {
     return;
   }
   if (!response.ok) {
-    showNotification("確認結果を保存できませんでした。");
+    showNotification("確認結果を登録できませんでした。");
     return;
   }
   upsertDetections([await response.json()]);
   render();
-  showNotification("確認結果を保存しました。");
+  showNotification("確認結果を登録しました。");
 }
 
 async function deleteSelectedDetection() {
   if (!state.selectedId) return;
   const detection = state.detections.get(state.selectedId);
   if (!detection) return;
-  const ok = window.confirm(`${formatDate(detection.detected_at)} のイベントを削除します。`);
+  const ok = window.confirm(
+    `${formatDate(detection.detected_at)}の検知記録と動画を削除します。よろしいですか？`
+  );
   if (!ok) return;
 
   const response = await fetch(`/api/detections/${encodeURIComponent(state.selectedId)}`, {
@@ -217,37 +227,37 @@ async function deleteSelectedDetection() {
     return;
   }
   if (!response.ok) {
-    showNotification("イベントを削除できませんでした。");
+    showNotification("検知記録を削除できませんでした。");
     return;
   }
 
   state.detections.delete(state.selectedId);
   state.selectedId = null;
   render();
-  showNotification("イベントを削除しました。");
+  showNotification("検知記録と動画を削除しました。");
 }
 
 function connectEvents() {
   state.eventSource?.close();
   state.eventSource = new EventSource("/api/events");
   state.eventSource.addEventListener("open", async () => {
-    setConnectionStatus(true);
+    setConnectionStatus("connected");
     try {
       await loadDetections();
     } catch (error) {
       showNotification(error.message);
     }
   });
-  state.eventSource.addEventListener("error", () => setConnectionStatus(false));
+  state.eventSource.addEventListener("error", () => setConnectionStatus("reconnecting"));
   state.eventSource.addEventListener("fall_detected", async (event) => {
     const { event_id: eventId } = JSON.parse(event.data);
     await refreshDetection(eventId);
-    showNotification("新しい転倒検知イベントを受信しました。");
+    showNotification("転倒を検知しました。");
   });
   state.eventSource.addEventListener("video_ready", async (event) => {
     const { event_id: eventId } = JSON.parse(event.data);
     await refreshDetection(eventId);
-    showNotification("検知映像の準備が完了しました。");
+    showNotification("転倒前後の動画を再生できます。");
   });
 }
 
@@ -261,8 +271,12 @@ async function submitLogin(event) {
       password: elements.loginPassword.value,
     }),
   });
+  if (response.status === 401) {
+    showNotification("ユーザー名またはパスワードが正しくありません。");
+    return;
+  }
   if (!response.ok) {
-    showNotification("ログインできませんでした。");
+    showNotification("ログイン処理に失敗しました。");
     return;
   }
   setAuthenticated(await response.json());

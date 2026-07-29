@@ -1,5 +1,3 @@
-"""USBカメラ取得、YOLO-Pose推論、ローカル表示の入口。"""
-
 from __future__ import annotations
 
 import logging
@@ -249,7 +247,7 @@ def extract_pose_detections(result: Any) -> list[PoseDetection]:
 
 
 def select_primary_person(detections: list[PoseDetection]) -> PoseDetection | None:
-    """人物追跡は行わず、転倒判定には画面内で最も大きい人物だけを使う。"""
+    # 人物追跡は行わず，画面内で最も大きく検出された人物を転倒判定の対象とする．
     if not detections:
         return None
     return max(detections, key=lambda detection: detection.area)
@@ -436,7 +434,7 @@ def main() -> None:
             if pending_event is None and detected:
                 event_id = str(uuid.uuid4())
                 try:
-                    # 通知を遅らせないため、動画生成より先に検知情報を送信する。
+                    # 通知を遅らせないため，動画生成より先に検知情報を送信する．
                     api_client.register_detection(event_id, camera_id, utc_now())
                     LOGGER.info("registered detection %s", event_id)
                     detector.mark_detected(timestamp)

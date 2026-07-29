@@ -12,7 +12,7 @@
       <div class="topbar-status">
         <p id="current-user" class="current-user"></p>
         <button id="logout" class="secondary-button" type="button" hidden>ログアウト</button>
-        <p id="sse-status" class="connection disconnected">SSE 未接続</p>
+        <p id="sse-status" class="connection" hidden></p>
       </div>
     </header>
     <main>
@@ -31,17 +31,17 @@
           <button type="submit">ログイン</button>
         </form>
       </section>
-      <section class="layout" aria-label="転倒イベント確認" hidden>
+      <section class="layout" aria-label="転倒検知記録確認" hidden>
         <section class="event-panel">
-          <h2>イベント一覧</h2>
+          <h2>検知記録</h2>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>カメラ ID</th>
+                  <th>カメラ</th>
                   <th>検知日時</th>
-                  <th>動画</th>
-                  <th>確認</th>
+                  <th>動画状態</th>
+                  <th>確認結果</th>
                 </tr>
               </thead>
               <tbody id="detection-list"></tbody>
@@ -49,13 +49,13 @@
           </div>
         </section>
         <section class="detail-panel">
-          <h2>映像確認</h2>
-          <p id="selected-summary" class="selected-summary">イベントを選択してください。</p>
+          <h2>動画確認</h2>
+          <p id="selected-summary" class="selected-summary">確認する検知記録を選択してください。</p>
           <video id="video-player" controls preload="metadata"></video>
           <div class="review-actions">
-            <button id="confirm-fall" type="button" disabled>転倒を確認</button>
-            <button id="reject-fall" type="button" disabled>転倒ではない</button>
-            <button id="delete-event" class="danger-button" type="button" disabled>削除</button>
+            <button id="confirm-fall" type="button" disabled>転倒として登録</button>
+            <button id="reject-fall" type="button" disabled>誤検知として登録</button>
+            <button id="delete-event" class="danger-button" type="button" disabled>検知記録を削除</button>
           </div>
         </section>
       </section>
