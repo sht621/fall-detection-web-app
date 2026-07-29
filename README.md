@@ -2,11 +2,9 @@
 
 ## 1．アプリ概要
 
-このリポジトリは，USBカメラ映像を使った転倒検知イベント通知・映像確認Webシステムです．
-カメラ側はOpenCVでUSBカメラ映像を取得し，YOLO-Poseで人物領域とキーポイントを取得します．
-取得した姿勢情報をルールベース処理へ渡し，転倒条件を満たした場合に検知情報を先にWebサーバへ送信します．
-その後，リングバッファから転倒前後の動画を生成し，同じ検知記録に紐づけて送信します．
-ブラウザ利用者は通知を受け取り，動画確認，確認結果登録，検知記録と動画の削除を行います．
+USBカメラ映像から人物の転倒を検知し，ブラウザへ通知するWebアプリケーションです．
+カメラ側ではYOLO-Poseによる姿勢推定とルールベース処理で転倒を判定し，検知情報を先にサーバへ送信した後，転倒前後の動画を生成して送信します．
+ブラウザでは，検知記録と動画の確認，転倒または誤検知の登録，記録の削除を行います．
 
 ## 2．主要ファイル
 
@@ -67,33 +65,6 @@ OpenCV，Ultralytics，PyTorch，HTTPXは，カメラ取得，姿勢推定，GPU
 | `HOST_CAMERA_DEVICE` | ホスト側のUSBカメラデバイス |
 | `SHOW_WINDOW` | OpenCV画面表示の有効または無効 |
 
-`MONITOR_PASSWORD_HASH` は次のコマンドで生成できます．
-
-```bash
-python3 - <<'PY'
-import base64
-import getpass
-import hashlib
-import secrets
-
-password = getpass.getpass("monitor password: ").encode("utf-8")
-salt = secrets.token_bytes(16)
-iterations = 260000
-digest = hashlib.pbkdf2_hmac("sha256", password, salt, iterations)
-print("pbkdf2_sha256:{}:{}:{}".format(
-    iterations,
-    base64.urlsafe_b64encode(salt).decode().rstrip("="),
-    base64.urlsafe_b64encode(digest).decode().rstrip("="),
-))
-PY
-```
-
-保存ディレクトリを作成します．
-
-```bash
-mkdir -p data/camera-output models
-```
-
 OpenCV画面を表示する場合だけ，現在のローカルユーザーにX11アクセスを許可します．
 
 ```bash
@@ -109,7 +80,7 @@ docker compose up --build
 ブラウザで次を開きます．
 
 ```text
-http://localhost:8000/monitor
+http://<WebサーバのIPアドレス>:8000/monitor
 ```
 
 終了します．
