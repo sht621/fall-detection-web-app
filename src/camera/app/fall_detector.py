@@ -35,27 +35,22 @@ class FallDetector:
     def update(self, keypoints: Any, bbox: Any, timestamp: float) -> bool:
         # 転倒条件が一定時間継続したときだけTrueを返す．
         if self.state is FallState.COOLDOWN:
-            if self.last_detected_at is not None and timestamp - self.last_detected_at >= self.cooldown_seconds:
-                self.state = FallState.NORMAL
-                self.candidate_started_at = None
+            if self._cooldown_elapsed(timestamp):
+                self._reset_candidate()
             return False
 
-        suspicious = self._is_suspicious_pose(keypoints, bbox)
-        if not suspicious:
-            self.state = FallState.NORMAL
-            self.candidate_started_at = None
+        if not self._is_suspicious_pose(keypoints, bbox):
+            self._reset_candidate()
             return False
 
         if self.state is FallState.NORMAL:
-            self.state = FallState.CANDIDATE
-            self.candidate_started_at = timestamp
+            self._start_candidate(timestamp)
             return False
 
-        if self.state is FallState.CANDIDATE and self.candidate_started_at is not None:
-            if timestamp - self.candidate_started_at >= self.candidate_seconds:
-                self.state = FallState.FALL_DETECTED
-                self.last_detected_at = timestamp
-                return True
+        if self.state is FallState.CANDIDATE and self._candidate_elapsed(timestamp):
+            self.state = FallState.FALL_DETECTED
+            self.last_detected_at = timestamp
+            return True
 
         return False
 
@@ -66,19 +61,44 @@ class FallDetector:
         self.state = FallState.COOLDOWN
 
     def _is_suspicious_pose(self, keypoints: Any, bbox: Any) -> bool:
-        if bbox is None:
+        bbox_values = self._normalize_bbox(bbox)
+        if bbox_values is None:
             return False
 
+        xy, confidence = self._split_keypoints(keypoints)
+        # BBoxと胴体角度の両方を満たす場合だけ転倒候補とする．
+        return self._is_horizontal_bbox(bbox_values) and self._is_torso_tilted(xy, confidence)
+
+    def _normalize_bbox(self, bbox: Any) -> tuple[float, float, float, float] | None:
+        if bbox is None:
+            return None
         x1, y1, x2, y2 = (float(value) for value in bbox)
+        return x1, y1, x2, y2
+
+    def _is_horizontal_bbox(self, bbox: tuple[float, float, float, float]) -> bool:
+        x1, y1, x2, y2 = bbox
         width = max(0.0, x2 - x1)
         height = max(1.0, y2 - y1)
         bbox_aspect = width / height
-        if bbox_aspect >= self.bbox_aspect_threshold:
-            return True
+        return bbox_aspect >= self.bbox_aspect_threshold
 
-        xy, confidence = self._split_keypoints(keypoints)
+    def _is_torso_tilted(self, xy: np.ndarray, confidence: np.ndarray | None) -> bool:
         torso_angle = self._torso_angle_from_vertical(xy, confidence)
         return torso_angle is not None and torso_angle >= self.torso_angle_threshold
+
+    def _cooldown_elapsed(self, timestamp: float) -> bool:
+        return self.last_detected_at is not None and timestamp - self.last_detected_at >= self.cooldown_seconds
+
+    def _candidate_elapsed(self, timestamp: float) -> bool:
+        return self.candidate_started_at is not None and timestamp - self.candidate_started_at >= self.candidate_seconds
+
+    def _start_candidate(self, timestamp: float) -> None:
+        self.state = FallState.CANDIDATE
+        self.candidate_started_at = timestamp
+
+    def _reset_candidate(self) -> None:
+        self.state = FallState.NORMAL
+        self.candidate_started_at = None
 
     def _split_keypoints(self, keypoints: Any) -> tuple[np.ndarray, np.ndarray | None]:
         if keypoints is None:

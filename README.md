@@ -12,7 +12,7 @@ USBカメラ映像から人物の転倒を検知し，ブラウザへ通知す�
 src/
 ├── camera/app/
 │   ├── main.py            カメラ取得，姿勢推定，転倒検知処理
-│   ├── fall_detector.py   ルールベースの転倒判定
+│   ├── fall_detector.py   BBox横長と胴体傾きによる転倒判定
 │   ├── video_buffer.py    リングバッファとMP4生成
 │   └── api_client.py      検知情報と動画の送信
 └── server/app/
@@ -74,7 +74,7 @@ xhost +SI:localuser:$(id -un)
 Docker Composeで起動します．
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
 ブラウザで次を開きます．

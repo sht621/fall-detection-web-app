@@ -50,9 +50,20 @@ function badge(value) {
 }
 
 function showNotification(message) {
+  elements.notification.hidden = false;
   elements.notification.textContent = message;
   elements.notification.classList.add("visible");
-  window.setTimeout(() => elements.notification.classList.remove("visible"), 4500);
+  window.setTimeout(() => {
+    elements.notification.classList.remove("visible");
+    elements.notification.textContent = "";
+    elements.notification.hidden = true;
+  }, 4500);
+}
+
+function clearNotification() {
+  elements.notification.classList.remove("visible");
+  elements.notification.textContent = "";
+  elements.notification.hidden = true;
 }
 
 function setConnectionStatus(status) {
@@ -84,6 +95,7 @@ function setUnauthenticated() {
   state.selectedId = null;
   state.eventSource?.close();
   state.eventSource = null;
+  clearNotification();
   setConnectionStatus("hidden");
   elements.currentUser.textContent = "";
   elements.logout.hidden = true;
@@ -286,6 +298,7 @@ async function submitLogin(event) {
 }
 
 async function logout() {
+  clearNotification();
   await fetch("/api/logout", {
     method: "POST",
     headers: { "X-CSRF-Token": state.csrfToken || "" },

@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -23,6 +24,10 @@ LOGGER = logging.getLogger(__name__)
 
 WINDOW_NAME = "Fall Detection Camera"
 KEYPOINT_CONFIDENCE = 0.25
+NORMAL_COLOR = (0, 200, 0)
+FALL_COLOR = (0, 0, 255)
+TEXT_COLOR = (240, 240, 240)
+TEXT_SHADOW_COLOR = (0, 0, 0)
 SKELETON_EDGES = (
     (5, 6),
     (5, 7),
@@ -255,7 +260,7 @@ def select_primary_person(detections: list[PoseDetection]) -> PoseDetection | No
 
 def draw_pose(display_frame: np.ndarray, detection: PoseDetection, fall_detected: bool) -> None:
     x1, y1, x2, y2 = (int(round(v)) for v in detection.bbox)
-    color = (0, 0, 255) if fall_detected else (0, 200, 0)
+    color = FALL_COLOR if fall_detected else NORMAL_COLOR
     cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
 
     points = detection.keypoints_xy
@@ -270,18 +275,16 @@ def draw_pose(display_frame: np.ndarray, detection: PoseDetection, fall_detected
     for index, point in enumerate(points):
         if index >= len(scores) or scores[index] < KEYPOINT_CONFIDENCE:
             continue
-        cv2.circle(display_frame, tuple(point.astype(int)), 3, (255, 255, 255), -1)
+        cv2.circle(display_frame, tuple(point.astype(int)), 3, color, -1)
 
 
 def draw_status(display_frame: np.ndarray, camera_id: str, fall_active: bool) -> None:
-    lines = [f"camera: {camera_id}"]
+    cv2.putText(display_frame, f"camera: {camera_id}", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.62, TEXT_SHADOW_COLOR, 4)
+    cv2.putText(display_frame, f"camera: {camera_id}", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.62, TEXT_COLOR, 2)
+
     if fall_active:
-        lines.append("fall detected")
-    y = 24
-    for line in lines:
-        cv2.putText(display_frame, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 0, 0), 4)
-        cv2.putText(display_frame, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (240, 240, 240), 2)
-        y += 24
+        cv2.putText(display_frame, "fall detected", (12, 78), cv2.FONT_HERSHEY_SIMPLEX, 1.3, TEXT_SHADOW_COLOR, 6)
+        cv2.putText(display_frame, "fall detected", (12, 78), cv2.FONT_HERSHEY_SIMPLEX, 1.3, FALL_COLOR, 3)
 
 
 def draw_local_preview(
@@ -327,7 +330,7 @@ def main() -> None:
     fall_bbox_aspect_threshold = env_float("FALL_BBOX_ASPECT_THRESHOLD", 1.15)
     fall_torso_angle_threshold = env_float("FALL_TORSO_ANGLE_THRESHOLD", 60.0)
     status_log_seconds = env_float("STATUS_LOG_SECONDS", 5.0)
-    output_dir = Path(os.getenv("CAMERA_OUTPUT_DIR", "/app/output"))
+    output_dir = Path(os.getenv("CAMERA_OUTPUT_DIR", Path(tempfile.gettempdir()) / "fall-detection-camera"))
 
     if process_fps <= 0:
         raise RuntimeError("PROCESS_FPS must be greater than 0")
@@ -451,6 +454,8 @@ def main() -> None:
                     LOGGER.info("uploaded %s frames for detection %s", frame_count, event_id)
                 except Exception:
                     LOGGER.exception("could not create or upload video for %s", event_id)
+                finally:
+                    video_path.unlink(missing_ok=True)
                 pending_event = None
 
     finally:
